@@ -6,7 +6,7 @@ from picamera2 import Picamera2
 from datetime import datetime
 
 # 서버 주소 (필요하면 IP로 바꿔라)
-SERVER_URL = "http://127.0.0.1:5000/upload"
+SERVER_URL = "http://127.0.0.1:5000/api/upload"
 
 # 저장될 임시 파일 경로
 TEMP_DIR = "/home/pi/label_temp"

@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template, url_for, Response
+from flask import Flask, request, render_template, url_for, Response, redirect
 from pathlib import Path
 from datetime import datetime
 import uuid
@@ -82,62 +82,512 @@ def translate_text_papago(text: str) -> str:
 
 @dataclass
 class NutritionInfo:
+    # 칼로리
+    calories_value: Optional[float] = None
+    calories_unit: Optional[str] = None
+    # 탄수화물
+    carbs_value: Optional[float] = None
+    carbs_unit: Optional[str] = None
+    # 당류
     sugar_value: Optional[float] = None
     sugar_unit: Optional[str] = None
+    # 단백질
+    protein_value: Optional[float] = None
+    protein_unit: Optional[str] = None
+    # 지방
+    fat_value: Optional[float] = None
+    fat_unit: Optional[str] = None
+    # 포화지방
+    saturated_fat_value: Optional[float] = None
+    saturated_fat_unit: Optional[str] = None
+    # 트랜스지방
+    trans_fat_value: Optional[float] = None
+    trans_fat_unit: Optional[str] = None
+    # 콜레스테롤
+    cholesterol_value: Optional[float] = None
+    cholesterol_unit: Optional[str] = None
+    # 나트륨
     sodium_value: Optional[float] = None
     sodium_unit: Optional[str] = None
+    # 1회 제공량
+    serving_size: Optional[str] = None
+    # 알레르기
     allergens: Optional[List[str]] = None
 
 
-ALLERGEN_KEYWORDS = [
-    "우유", "치즈", "버터",
-    "밀", "글루텐",
-    "대두", "콩",
-    "땅콩", "호두", "아몬드",
-    "계란", "난류",
-    "새우", "게",
-    "오징어", "조개",
-    "깨"
+# 알레르기 유발 성분 키워드 - 안전한 키워드 (2글자 이상, 오탐 가능성 낮음)
+ALLERGEN_KEYWORDS_SAFE = [
+    # 유제품
+    "우유", "유제품", "치즈", "버터", "크림", "유당", "유청", "카제인",
+    "우유류", "탈지분유", "전지분유", "연유", "요거트", "요구르트",
+    # 밀/글루텐
+    "글루텐", "소맥", "소맥분", "밀가루", "밀분",
+    # 대두
+    "대두", "두부", "된장", "간장", "대두유", "콩기름",
+    # 견과류
+    "땅콩", "호두", "아몬드", "캐슈넛", "피스타치오", "헤이즐넛", 
+    "마카다미아", "피칸", "견과", "견과류", "브라질너트",
+    # 난류
+    "계란", "난류", "달걀", "난백", "난황", "전란", "전란분",
+    # 갑각류
+    "새우", "랍스터", "가재", "갑각류", "크랩", "쉬림프",
+    # 연체류/조개류
+    "오징어", "조개", "홍합", "전복", "문어", "연체류", "조개류",
+    "바지락", "꼬막", "가리비", "낙지",
+    # 생선
+    "고등어", "연어", "참치", "생선", "어류", "어패류",
+    # 기타
+    "참깨", "들깨", "메밀", "아황산류", "아황산", "이산화황",
+    "셀러리", "겨자", "토마토", "돼지고기", "쇠고기", "닭고기", "복숭아",
+    "사과", "키위", "바나나",
 ]
+
+# 짧은 키워드 (1글자) - 특정 문맥에서만 검출
+ALLERGEN_KEYWORDS_SHORT = ["밀", "콩", "굴", "게", "깨", "잣", "알"]
+
+# 짧은 키워드가 허용되는 접미사 패턴
+ALLERGEN_CONTEXT_SUFFIXES = ["함유", "포함", "사용", "첨가", "성분", "원료"]
+
+# 알레르기 OCR 오타 매핑
+ALLERGEN_TYPO_MAP = {
+    "우유우": "우유",
+    "대두두": "대두",
+    "계란란": "계란",
+    "달걀걀": "달걀",
+    "밀밀": "밀",
+}
+
+
+def normalize_ocr_text(text: str) -> str:
+    """OCR 텍스트 정규화 - 흔한 오타 수정"""
+    replacements = {
+        # 열량 오타
+        "엷니물론": "열량",
+        "열망": "열량",
+        "열닝": "열량",
+        "엻량": "열량",
+        "열량": "열량",
+        "영량": "열량",
+        # 나트륨 오타 (나트룹, 나트름 등)
+        "나트룹": "나트륨",
+        "나트름": "나트륨",
+        "나트릅": "나트륨",
+        "나트류": "나트륨",
+        "나뜨륨": "나트륨",
+        "나트륨": "나트륨",
+        "나트룸": "나트륨",
+        "나튜륨": "나트륨",
+        # 당류 오타 (당료, 당루 등)
+        "당료": "당류",
+        "당류류": "당류",
+        "당루": "당류",
+        "당류": "당류",
+        # 탄수화물 오타
+        "단수화물": "탄수화물",
+        "탄수화믈": "탄수화물",
+        "탄수화뭃": "탄수화물",
+        "@수회물": "탄수화물",
+        "@수화물": "탄수화물",
+        # 단백질 오타
+        "단백지": "단백질",
+        "단백잘": "단백질",
+        "백칠": "단백질",
+        "백질": "단백질",
+        # 지방 오타
+        "지밥": "지방",
+        "지빵": "지방",
+        "재방": "지방",
+        "재밤": "지방",
+        # 포화지방
+        "포화지밥": "포화지방",
+        "포화지빵": "포화지방",
+        "피회재방": "포화지방",
+        "피회재밤": "포화지방",
+        "프화지방": "포화지방",
+        # 트랜스지방
+        "트스지방": "트랜스지방",
+        "트렌스지방": "트랜스지방",
+        "흐재": "트랜스지방",
+        # 콜레스테롤
+        "플레스로": "콜레스테롤",
+        "콜레스로": "콜레스테롤",
+        "콜레스테릴": "콜레스테롤",
+        "콜레스테룰": "콜레스테롤",
+        "킬세물": "콜레스테롤",
+        # 알레르기 관련 오타
+        "알레르기": "알레르기",
+        "알러지": "알레르기",
+        "알러르기": "알레르기",
+        "알레지": "알레르기",
+        # 알레르기 성분 오타
+        "우유우": "우유",
+        "대두두": "대두",
+        "계란란": "계란",
+        "달걀걀": "달걀",
+        # 단백질 오타
+        "단백지": "단백질",
+        "단백잘": "단백질",
+        # 탄수화물 오타
+        "탄수화뭃": "탄수화물",
+        "탄수화믈": "탄수화물",
+        # 칼로리 오타
+        "칼로리리": "칼로리",
+        "kcaI": "kcal",
+        "KcaI": "kcal",
+        # 지방 오타
+        "지밥": "지방",
+        "지빵": "지방",
+        # 포화지방
+        "포화지빵": "포화지방",
+        # 콜레스테롤
+        "콜레스테릴": "콜레스테롤",
+        "콜레스테룰": "콜레스테롤",
+        # 단위
+        "9": "g",  # 숫자 9가 g로 오인식되는 경우는 문맥에 따라
+        "mq": "mg",
+        "M9": "mg",
+    }
+    
+    result = text
+    for wrong, correct in replacements.items():
+        result = result.replace(wrong, correct)
+    
+    # "숫자 9" 패턴을 "숫자 g"로 변환 (OCR이 g를 9로 인식하는 경우)
+    # 예: "18 9" → "18 g", "2 9" → "2 g"
+    result = re.sub(r"(\d+(?:\.\d+)?)\s*9\b", r"\1 g", result)
+    
+    # "숫자9" 패턴도 처리 (공백 없는 경우)
+    result = re.sub(r"(\d+(?:\.\d+)?)9\b(?!\d)", r"\1g", result)
+    
+    return result
+
+
+def extract_value_unit(text: str, patterns: list) -> tuple:
+    """
+    여러 패턴으로 값과 단위 추출
+    Returns: (value, unit) or (None, None)
+    """
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            try:
+                value = float(match.group("value"))
+                unit = match.group("unit") if "unit" in match.groupdict() else None
+                return value, unit
+            except (ValueError, IndexError):
+                continue
+    return None, None
 
 
 def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
     """
-    OCR 텍스트에서 '당류', '나트륨', 알레르기 유발 성분을 추출
-    - '30 g당 160 kcal' 같은 문장의 '당'은 무시
-    - '나트륨' OCR 오타인 '나트름'도 함께 인식
+    OCR 텍스트에서 영양 정보 및 알레르기 유발 성분을 추출
+    - 확장된 영양 성분 (칼로리, 탄수화물, 단백질, 지방 등)
+    - OCR 오타 보정
+    - 다양한 표기 패턴 지원
     """
-    # 공백 정리
-    norm_text = re.sub(r"\s+", " ", text)
-
-    # 🔹 당류: '당류' 만 잡고, 'g당'의 '당'은 안 잡게 함
-    sugar_pattern = re.compile(
-        r"(당류)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(g|mg|그램|%)?",
-        re.IGNORECASE,
+    # 텍스트 정규화
+    norm_text = normalize_ocr_text(text)
+    norm_text = re.sub(r"\s+", " ", norm_text)
+    
+    # 숫자 패턴 (정수 또는 소수)
+    num = r"(?P<value>\d+(?:[.,]\d+)?)"
+    
+    # ========== 칼로리/열량 ==========
+    calories_patterns = [
+        re.compile(rf"(?:열량|에너지|칼로리|Calories?|Energy)\s*[:\-]?\s*{num}\s*(?P<unit>kcal|cal|kca1|킬로칼로리)?", re.IGNORECASE),
+        re.compile(rf"{num}\s*(?P<unit>kcal|kca1|Kcal|킬로칼로리)", re.IGNORECASE),
+        # 공백 없는 패턴
+        re.compile(rf"(?:열량|칼로리){num}(?P<unit>kcal)?", re.IGNORECASE),
+    ]
+    calories_value, calories_unit = extract_value_unit(norm_text, calories_patterns)
+    
+    # 공백 없는 텍스트에서도 열량 재검색
+    if calories_value is None:
+        text_compact = re.sub(r"\s+", "", norm_text)
+        cal_compact_match = re.search(r"열량(\d+(?:\.\d+)?)(kcal)?", text_compact, re.IGNORECASE)
+        if cal_compact_match:
+            calories_value = float(cal_compact_match.group(1))
+            calories_unit = cal_compact_match.group(2) or "kcal"
+    
+    # ========== 탄수화물 ==========
+    carbs_patterns = [
+        re.compile(rf"(?:탄수화물|단수화물|탄수화믈|carbohydrate|carb)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+    ]
+    carbs_value, carbs_unit = extract_value_unit(norm_text, carbs_patterns)
+    
+    # 공백 없는 텍스트에서도 탄수화물 재검색
+    if carbs_value is None:
+        text_compact = re.sub(r"\s+", "", norm_text)
+        carbs_compact_match = re.search(r"[탄단]수화물(\d+(?:\.\d+)?)(g|mg)?", text_compact, re.IGNORECASE)
+        if carbs_compact_match:
+            carbs_value = float(carbs_compact_match.group(1))
+            carbs_unit = carbs_compact_match.group(2) or "g"
+    
+    # ========== 당류 ==========
+    sugar_patterns = [
+        # 기본 패턴: "당류 5g", "당료 2 g" (OCR 오타 포함)
+        re.compile(rf"(?:당류|당료|당분|sugar|sugars)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+        # "당류 5g" 또는 "당류: 5 g" 형태
+        re.compile(rf"(?:당류|당료)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg)?", re.IGNORECASE),
+        # 공백 없는 패턴: "당류5g"
+        re.compile(rf"(?:당류|당료){num}(?P<unit>g|mg)?", re.IGNORECASE),
+    ]
+    sugar_value, sugar_unit = extract_value_unit(norm_text, sugar_patterns)
+    
+    # 공백 없는 텍스트에서도 당류 재검색
+    if sugar_value is None:
+        text_compact = re.sub(r"\s+", "", norm_text)
+        sugar_compact_match = re.search(r"당[류료](\d+(?:\.\d+)?)(g|mg)?", text_compact, re.IGNORECASE)
+        if sugar_compact_match:
+            sugar_value = float(sugar_compact_match.group(1))
+            sugar_unit = sugar_compact_match.group(2) or "g"
+    
+    # ========== 단백질 ==========
+    protein_patterns = [
+        re.compile(rf"(?:단백질|protein)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+    ]
+    protein_value, protein_unit = extract_value_unit(norm_text, protein_patterns)
+    
+    # ========== 지방 ==========
+    fat_patterns = [
+        re.compile(rf"(?:지방|fat|total\s*fat)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+    ]
+    fat_value, fat_unit = extract_value_unit(norm_text, fat_patterns)
+    
+    # ========== 포화지방 ==========
+    sat_fat_patterns = [
+        re.compile(rf"(?:포화지방|포화\s*지방|saturated\s*fat)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+    ]
+    saturated_fat_value, saturated_fat_unit = extract_value_unit(norm_text, sat_fat_patterns)
+    
+    # ========== 트랜스지방 ==========
+    trans_fat_patterns = [
+        re.compile(rf"(?:트랜스지방|트랜스\s*지방|트스지방|트렌스지방|trans\s*fat)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+    ]
+    trans_fat_value, trans_fat_unit = extract_value_unit(norm_text, trans_fat_patterns)
+    
+    # ========== 콜레스테롤 ==========
+    cholesterol_patterns = [
+        re.compile(rf"(?:콜레스테롤|플레스로|콜레스로|cholesterol)\s*[:\-]?\s*{num}\s*(?P<unit>mg|g|%)?", re.IGNORECASE),
+    ]
+    cholesterol_value, cholesterol_unit = extract_value_unit(norm_text, cholesterol_patterns)
+    
+    # ========== 나트륨 ==========
+    sodium_patterns = [
+        # 기본 패턴: "나트륨 150mg", "나트륨: 150 mg", "나트룹 150 mg"
+        re.compile(rf"(?:나트륨|나트름|나트류|나트룹|나트룸|sodium)\s*[:\-]?\s*{num}\s*(?P<unit>mg|g|%)?", re.IGNORECASE),
+        # 숫자 먼저 오는 패턴: "150mg 나트륨"
+        re.compile(rf"{num}\s*(?P<unit>mg|g)\s*(?:나트륨|나트름|나트룹|sodium)", re.IGNORECASE),
+        # 공백 없는 패턴: "나트륨150mg"
+        re.compile(rf"(?:나트륨|나트름|나트룹){num}(?P<unit>mg|g)?", re.IGNORECASE),
+        # Na 패턴
+        re.compile(rf"Na\s*[:\-]?\s*{num}\s*(?P<unit>mg|g)?", re.IGNORECASE),
+    ]
+    sodium_value, sodium_unit = extract_value_unit(norm_text, sodium_patterns)
+    
+    # 공백 없는 텍스트에서도 나트륨 재검색
+    if sodium_value is None:
+        text_compact = re.sub(r"\s+", "", norm_text)
+        sodium_compact_match = re.search(r"나트[륨름류룹룸](\d+(?:\.\d+)?)(mg|g)?", text_compact, re.IGNORECASE)
+        if sodium_compact_match:
+            sodium_value = float(sodium_compact_match.group(1))
+            sodium_unit = sodium_compact_match.group(2) or "mg"
+    
+    # ========== 1회 제공량 ==========
+    serving_match = re.search(
+        r"(?:1회\s*제공량|1회\s*섭취량|serving\s*size|총\s*내용량)[:\s]*([0-9]+(?:\.[0-9]+)?\s*(?:g|ml|mL|그램|밀리리터)?)",
+        norm_text, re.IGNORECASE
     )
-    sugar_match = sugar_pattern.search(norm_text)
-
-    sugar_value = float(sugar_match.group(2)) if sugar_match else None
-    sugar_unit = sugar_match.group(3) if (sugar_match and sugar_match.group(3)) else None
-
-    # 🔹 나트륨: 나트륨/나트름/Na/소금/염분 등
-    sodium_pattern = re.compile(
-        r"(나트[륨름]|소금|염분|Na)\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(mg|g|그램|%)?",
-        re.IGNORECASE,
-    )
-    sodium_match = sodium_pattern.search(norm_text)
-
-    sodium_value = float(sodium_match.group(2)) if sodium_match else None
-    sodium_unit = sodium_match.group(3) if (sodium_match and sodium_match.group(3)) else None
-
-    # 🔹 알레르기 키워드 검색
-    found_allergens = sorted({kw for kw in ALLERGEN_KEYWORDS if kw in norm_text})
-
+    serving_size = serving_match.group(1).strip() if serving_match else None
+    
+    # ========== 알레르기 유발 성분 ==========
+    found_allergens = set()
+    
+    # 원본 텍스트에서도 검색 (공백 제거 버전)
+    text_no_space = re.sub(r"\s+", "", text)
+    
+    # 1. 안전한 키워드(2글자 이상) - 전체 텍스트에서 검색
+    for kw in ALLERGEN_KEYWORDS_SAFE:
+        if kw in norm_text or kw in text_no_space:
+            found_allergens.add(kw)
+    
+    # 2. 알레르기 관련 섹션 패턴들
+    allergen_section_patterns = [
+        r"(?:알[레러]르기|알[레러]지|allerg)[^:]*[:\s]*([^\n.。]{5,100})",
+        r"(?:함유|포함|contains?)[:\s]*([^\n.。]+)",
+        r"(?:이\s*제품은?|본\s*제품은?)[^에]*(?:사용|제조|생산)[^\n.。]*",
+        r"(?:원재료|원료)[:\s]*([^\n]{10,200})",
+        r"[(\(]([^)\)]*(?:우유|대두|밀|계란|땅콩|견과)[^)\)]*)[)\)]",
+    ]
+    
+    for pattern in allergen_section_patterns:
+        matches = re.findall(pattern, norm_text, re.IGNORECASE)
+        for match in matches:
+            section_text = match if isinstance(match, str) else " ".join(match)
+            # 안전한 키워드 검색
+            for kw in ALLERGEN_KEYWORDS_SAFE:
+                if kw in section_text:
+                    found_allergens.add(kw)
+            # 짧은 키워드는 알레르기 섹션 내에서만 검출
+            for kw in ALLERGEN_KEYWORDS_SHORT:
+                if kw in section_text:
+                    found_allergens.add(kw)
+    
+    # 3. "OO 함유/포함" 패턴 (예: "우유 함유", "밀 포함") - 짧은 키워드도 허용
+    for suffix in ALLERGEN_CONTEXT_SUFFIXES:
+        contains_pattern = re.findall(rf"(\w{{1,5}})\s*{suffix}", norm_text)
+        for item in contains_pattern:
+            if item in ALLERGEN_KEYWORDS_SAFE or item in ALLERGEN_KEYWORDS_SHORT:
+                found_allergens.add(item)
+    
+    # 4. 괄호 안 알레르기 표시 (예: "(우유, 대두, 밀 포함)")
+    paren_matches = re.findall(r"[(\(]([^)\)]+)[)\)]", norm_text)
+    for paren_content in paren_matches:
+        # 괄호 안에 알레르기 관련 키워드가 있으면 짧은 키워드도 검출
+        has_allergen_context = any(kw in paren_content for kw in ["함유", "포함", "알레르기", "알러지"])
+        for kw in ALLERGEN_KEYWORDS_SAFE:
+            if kw in paren_content:
+                found_allergens.add(kw)
+        if has_allergen_context:
+            for kw in ALLERGEN_KEYWORDS_SHORT:
+                if kw in paren_content:
+                    found_allergens.add(kw)
+    
+    found_allergens = sorted(found_allergens) if found_allergens else None
+    
+    # ========== 백업 추출: 줄 단위 분석 ==========
+    # 패턴 매칭이 실패한 경우, 줄 단위로 키워드와 숫자를 찾음
+    lines = text.split('\n')
+    
+    def find_number_near_keyword(lines: list, keywords: list) -> tuple:
+        """키워드가 있는 줄 또는 인접 줄에서 숫자 찾기"""
+        for i, line in enumerate(lines):
+            line_lower = line.lower()
+            for kw in keywords:
+                if kw in line_lower or kw in line:
+                    # 같은 줄에서 숫자 찾기
+                    nums = re.findall(r'(\d+(?:[.,]\d+)?)\s*(mg|g|kcal|%)?', line)
+                    if nums:
+                        try:
+                            val = float(nums[0][0].replace(',', '.'))
+                            unit = nums[0][1] if nums[0][1] else None
+                            return val, unit
+                        except:
+                            pass
+                    # 다음 줄에서 숫자 찾기
+                    if i + 1 < len(lines):
+                        nums = re.findall(r'(\d+(?:[.,]\d+)?)\s*(mg|g|kcal|%)?', lines[i+1])
+                        if nums:
+                            try:
+                                val = float(nums[0][0].replace(',', '.'))
+                                unit = nums[0][1] if nums[0][1] else None
+                                return val, unit
+                            except:
+                                pass
+        return None, None
+    
+    # 백업: 나트륨
+    if sodium_value is None:
+        sodium_value, sodium_unit = find_number_near_keyword(
+            lines, ['나트륨', '나트룹', '나트름', 'sodium', 'na']
+        )
+        if sodium_unit is None and sodium_value:
+            sodium_unit = 'mg'
+    
+    # 백업: 당류
+    if sugar_value is None:
+        sugar_value, sugar_unit = find_number_near_keyword(
+            lines, ['당류', '당료', 'sugar']
+        )
+        if sugar_unit is None and sugar_value:
+            sugar_unit = 'g'
+    
+    # 백업: 탄수화물
+    if carbs_value is None:
+        carbs_value, carbs_unit = find_number_near_keyword(
+            lines, ['탄수화물', '단수화물', 'carb']
+        )
+        if carbs_unit is None and carbs_value:
+            carbs_unit = 'g'
+    
+    # 백업: 단백질
+    if protein_value is None:
+        protein_value, protein_unit = find_number_near_keyword(
+            lines, ['단백질', 'protein']
+        )
+        if protein_unit is None and protein_value:
+            protein_unit = 'g'
+    
+    # 백업: 지방
+    if fat_value is None:
+        fat_value, fat_unit = find_number_near_keyword(
+            lines, ['지방', 'fat']
+        )
+        if fat_unit is None and fat_value:
+            fat_unit = 'g'
+    
+    # 백업: 열량
+    if calories_value is None:
+        calories_value, calories_unit = find_number_near_keyword(
+            lines, ['열량', '칼로리', 'calorie', 'kcal', 'energy']
+        )
+        if calories_unit is None and calories_value:
+            calories_unit = 'kcal'
+    
+    # ========== 최종 백업: 숫자+단위 패턴으로 직접 찾기 ==========
+    full_text = " ".join(lines)
+    
+    # 열량: 숫자 + kcal 패턴
+    if calories_value is None:
+        kcal_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:kcal|kca1|Kcal|킬로칼로리)', full_text, re.IGNORECASE)
+        if kcal_match:
+            calories_value = float(kcal_match.group(1))
+            calories_unit = 'kcal'
+    
+    # 나트륨: 숫자(100이상) + mg 패턴 (나트륨은 보통 100mg 이상)
+    if sodium_value is None:
+        # "숫자 mg" 패턴 중 나트륨일 가능성이 높은 것 찾기
+        mg_matches = re.findall(r'(\d+(?:\.\d+)?)\s*mg', full_text, re.IGNORECASE)
+        for match in mg_matches:
+            val = float(match)
+            # 50-2000mg 범위는 나트륨일 가능성 높음
+            if 50 <= val <= 2000 and sodium_value is None:
+                sodium_value = val
+                sodium_unit = 'mg'
+                break
+    
+    # 탄수화물: 숫자 + g 패턴 중 10-100 범위
+    if carbs_value is None:
+        g_matches = re.findall(r'(\d+(?:\.\d+)?)\s*g\b', full_text, re.IGNORECASE)
+        for match in g_matches:
+            val = float(match)
+            # 10-100g 범위는 탄수화물일 가능성
+            if 10 <= val <= 100 and carbs_value is None:
+                carbs_value = val
+                carbs_unit = 'g'
+                break
+    
     return NutritionInfo(
+        calories_value=calories_value,
+        calories_unit=calories_unit or "kcal" if calories_value else None,
+        carbs_value=carbs_value,
+        carbs_unit=carbs_unit or "g" if carbs_value else None,
         sugar_value=sugar_value,
-        sugar_unit=sugar_unit,
+        sugar_unit=sugar_unit or "g" if sugar_value else None,
+        protein_value=protein_value,
+        protein_unit=protein_unit or "g" if protein_value else None,
+        fat_value=fat_value,
+        fat_unit=fat_unit or "g" if fat_value else None,
+        saturated_fat_value=saturated_fat_value,
+        saturated_fat_unit=saturated_fat_unit or "g" if saturated_fat_value else None,
+        trans_fat_value=trans_fat_value,
+        trans_fat_unit=trans_fat_unit or "g" if trans_fat_value else None,
+        cholesterol_value=cholesterol_value,
+        cholesterol_unit=cholesterol_unit or "mg" if cholesterol_value else None,
         sodium_value=sodium_value,
-        sodium_unit=sodium_unit,
+        sodium_unit=sodium_unit or "mg" if sodium_value else None,
+        serving_size=serving_size,
         allergens=found_allergens or None,
     )
 
@@ -167,13 +617,19 @@ def detail(item_id):
     return render_template("detail.html", item=item)
 
 
+@app.route("/upload", methods=["POST"])
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     if "file" not in request.files:
-        return Response(json.dumps({"error": "No file provided"}, ensure_ascii=False),
-                        content_type="application/json; charset=utf-8")
+        # API 요청인지 확인 (Accept 헤더 또는 경로로 판단)
+        if request.path == "/api/upload" or request.headers.get("Accept") == "application/json":
+            return Response(json.dumps({"error": "No file provided"}, ensure_ascii=False),
+                            content_type="application/json; charset=utf-8")
+        return redirect(url_for("index"))
 
     file = request.files["file"]
+    label = request.form.get("label", "").strip() or None  # 제품명 (선택)
+    
     item_id = str(uuid.uuid4())
     filename = f"{item_id}.jpg"
     save_path = UPLOAD_DIR / filename
@@ -181,15 +637,29 @@ def api_upload():
 
     # OCR
     text = run_ocr(str(save_path), lang="kor+eng")
+    
+    # 디버그: OCR 결과 출력
+    print(f"[OCR 결과]\n{text[:500]}...")
 
     # 분석
     nutrition = extract_nutrition_and_allergens(text)
+    
+    # 디버그: 영양 정보 출력 (상세)
+    print(f"[영양 분석]")
+    print(f"  열량: {nutrition.calories_value} {nutrition.calories_unit or ''}")
+    print(f"  탄수화물: {nutrition.carbs_value} {nutrition.carbs_unit or ''}")
+    print(f"  당류: {nutrition.sugar_value} {nutrition.sugar_unit or ''}")
+    print(f"  단백질: {nutrition.protein_value} {nutrition.protein_unit or ''}")
+    print(f"  지방: {nutrition.fat_value} {nutrition.fat_unit or ''}")
+    print(f"  나트륨: {nutrition.sodium_value} {nutrition.sodium_unit or ''}")
+    print(f"  알레르기: {nutrition.allergens}")
 
     # 번역 (OFF이어도 안전)
     translated = translate_text_papago(text)
 
     result = {
         "id": item_id,
+        "label": label,
         "filename": filename,
         "text": text,
         "analysis": nutrition_to_dict(nutrition),
@@ -200,11 +670,22 @@ def api_upload():
 
     ocr_results.append(result)
 
-    # 🔹 JSON을 한글 그대로 반환
-    return Response(
-        json.dumps(result, ensure_ascii=False),
-        content_type="application/json; charset=utf-8"
-    )
+    # 웹 폼에서 업로드한 경우 리다이렉트, API 요청이면 JSON 반환
+    if request.path == "/api/upload" and request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return Response(
+            json.dumps(result, ensure_ascii=False),
+            content_type="application/json; charset=utf-8"
+        )
+    
+    # 라즈베리파이 등 외부에서 API로 요청한 경우 JSON 반환
+    if request.headers.get("Accept") == "application/json" or "python-requests" in request.headers.get("User-Agent", "").lower():
+        return Response(
+            json.dumps(result, ensure_ascii=False),
+            content_type="application/json; charset=utf-8"
+        )
+    
+    # 웹 폼에서 업로드한 경우 메인 페이지로 리다이렉트
+    return redirect(url_for("index"))
 
 
 # ===================== 실행 =====================

@@ -1,27 +1,574 @@
-<!-- server/templates/detail.html -->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>OCR 결과 상세</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OCR 결과 상세 - {{ item.label or '라벨' }}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    body { font-family: sans-serif; margin: 20px; }
-    pre { background: #f8f8f8; padding: 10px; white-space: pre-wrap; }
-    img { max-width: 400px; border: 1px solid #ccc; }
-    a { text-decoration: none; color: #007bff; }
+    :root {
+      --bg-dark: #0f1419;
+      --bg-card: #1a1f26;
+      --bg-card-hover: #242b35;
+      --accent-teal: #00d4aa;
+      --accent-orange: #ff6b35;
+      --accent-purple: #a855f7;
+      --accent-blue: #3b82f6;
+      --text-primary: #e7e9ea;
+      --text-secondary: #8b98a5;
+      --border-color: #2f3942;
+      --success: #22c55e;
+      --warning: #eab308;
+      --danger: #ef4444;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(ellipse at 20% 20%, rgba(0, 212, 170, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 50%);
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+
+    /* Back Button */
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: all 0.2s;
+      margin-bottom: 30px;
+    }
+
+    .back-btn:hover {
+      background: var(--bg-card-hover);
+      color: var(--accent-teal);
+      border-color: var(--accent-teal);
+    }
+
+    /* Header */
+    .detail-header {
+      margin-bottom: 40px;
+    }
+
+    .detail-header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, var(--accent-teal), var(--accent-purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .detail-meta {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      flex-wrap: wrap;
+    }
+
+    .detail-meta span {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Main Grid */
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    @media (max-width: 900px) {
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Card */
+    .card {
+      background: var(--bg-card);
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .card-header h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+    }
+
+    .card-header .icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+    }
+
+    .icon-image { background: rgba(168, 85, 247, 0.15); }
+    .icon-text { background: rgba(0, 212, 170, 0.15); }
+    .icon-analysis { background: rgba(59, 130, 246, 0.15); }
+    .icon-translate { background: rgba(255, 107, 53, 0.15); }
+
+    .card-body {
+      padding: 24px;
+    }
+
+    /* Image Card */
+    .image-container {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--bg-dark);
+    }
+
+    .image-container img {
+      width: 100%;
+      display: block;
+      cursor: zoom-in;
+      transition: transform 0.3s;
+    }
+
+    .image-container:hover img {
+      transform: scale(1.02);
+    }
+
+    /* OCR Text */
+    .ocr-text {
+      background: var(--bg-dark);
+      border-radius: 12px;
+      padding: 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .ocr-text::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .ocr-text::-webkit-scrollbar-track {
+      background: var(--bg-dark);
+    }
+
+    .ocr-text::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: 4px;
+    }
+
+    /* Nutrition Grid */
+    .nutrition-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .nutrition-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      background: var(--bg-dark);
+      border-radius: 12px;
+      border-left: 4px solid transparent;
+    }
+
+    .nutrition-item.calories { border-left-color: #f97316; }
+    .nutrition-item.carbs { border-left-color: #a78bfa; }
+    .nutrition-item.sugar { border-left-color: #f87171; }
+    .nutrition-item.protein { border-left-color: #4ade80; }
+    .nutrition-item.fat { border-left-color: #fbbf24; }
+    .nutrition-item.saturated-fat { border-left-color: #fb923c; }
+    .nutrition-item.trans-fat { border-left-color: #f43f5e; }
+    .nutrition-item.cholesterol { border-left-color: #e879f9; }
+    .nutrition-item.sodium { border-left-color: #60a5fa; }
+    .nutrition-item.serving { border-left-color: #2dd4bf; }
+
+    .nutrition-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    .nutrition-value {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+
+    .nutrition-value.calories { color: #f97316; }
+    .nutrition-value.carbs { color: #a78bfa; }
+    .nutrition-value.sugar { color: #f87171; }
+    .nutrition-value.protein { color: #4ade80; }
+    .nutrition-value.fat { color: #fbbf24; }
+    .nutrition-value.saturated-fat { color: #fb923c; }
+    .nutrition-value.trans-fat { color: #f43f5e; }
+    .nutrition-value.cholesterol { color: #e879f9; }
+    .nutrition-value.sodium { color: #60a5fa; }
+    .nutrition-value.serving { color: #2dd4bf; }
+
+    /* Allergens */
+    .allergen-section {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .allergen-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--warning);
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .allergen-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .allergen-tag {
+      padding: 8px 16px;
+      background: rgba(234, 179, 8, 0.15);
+      border: 1px solid rgba(234, 179, 8, 0.3);
+      border-radius: 20px;
+      font-size: 0.9rem;
+      color: #facc15;
+    }
+
+    .no-data {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-secondary);
+    }
+
+    .no-data svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    /* Translated Text */
+    .translated-text {
+      background: var(--bg-dark);
+      border-radius: 12px;
+      padding: 20px;
+      font-size: 0.95rem;
+      line-height: 1.8;
+      color: var(--text-primary);
+    }
+
+    /* Full Width Card */
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    /* Image Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 48px;
+      height: 48px;
+      background: var(--bg-card);
+      border: none;
+      border-radius: 50%;
+      color: var(--text-primary);
+      font-size: 1.5rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Animation */
+    .fade-in {
+      animation: fadeIn 0.5s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 600px) {
+      .nutrition-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
-  <a href="{{ url_for('index') }}">← 목록으로</a>
-  <h1>OCR 결과 상세</h1>
+  <div class="container">
+    <!-- Back Button -->
+    <a href="{{ url_for('index') }}" class="back-btn">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+      </svg>
+      목록으로 돌아가기
+    </a>
 
-  <p><strong>시간(UTC):</strong> {{ item.created_at }}</p>
-  <p><strong>제품(라벨):</strong> {{ item.label or '-' }}</p>
+    <!-- Header -->
+    <div class="detail-header fade-in">
+      <h1>{{ item.label or '식품 라벨 분석 결과' }}</h1>
+      <div class="detail-meta">
+        <span>
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {{ item.created_at }} (UTC)
+        </span>
+        <span>
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+          </svg>
+          {{ item.filename }}
+        </span>
+        {% if item.analysis.serving_size %}
+        <span>
+          <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/>
+          </svg>
+          1회 제공량: {{ item.analysis.serving_size }}
+        </span>
+        {% endif %}
+      </div>
+    </div>
 
-  <h2>라벨 이미지</h2>
-  <img src="{{ url_for('static', filename='uploads/' + item.filename) }}" alt="라벨 이미지">
+    <!-- Detail Grid -->
+    <div class="detail-grid">
+      <!-- Image Card -->
+      <div class="card fade-in" style="animation-delay: 0.1s">
+        <div class="card-header">
+          <div class="icon icon-image">🖼️</div>
+          <h2>라벨 이미지</h2>
+        </div>
+        <div class="card-body">
+          <div class="image-container" onclick="openModal()">
+            <img src="{{ url_for('static', filename='uploads/' + item.filename) }}" alt="라벨 이미지">
+          </div>
+        </div>
+      </div>
 
-  <h2>OCR 텍스트</h2>
-  <pre>{{ item.text }}</pre>
+      <!-- Nutrition Card -->
+      <div class="card fade-in" style="animation-delay: 0.2s">
+        <div class="card-header">
+          <div class="icon icon-analysis">📊</div>
+          <h2>영양 정보</h2>
+        </div>
+        <div class="card-body">
+          {% set has_nutrition = item.analysis.calories_value or item.analysis.carbs_value or item.analysis.sugar_value or item.analysis.protein_value or item.analysis.fat_value or item.analysis.sodium_value or item.analysis.saturated_fat_value or item.analysis.trans_fat_value or item.analysis.cholesterol_value %}
+          
+          {% if has_nutrition %}
+            <div class="nutrition-grid">
+              {% if item.analysis.calories_value %}
+              <div class="nutrition-item calories">
+                <div class="nutrition-label">🔥 열량</div>
+                <div class="nutrition-value calories">{{ item.analysis.calories_value }}{{ item.analysis.calories_unit or 'kcal' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.carbs_value %}
+              <div class="nutrition-item carbs">
+                <div class="nutrition-label">🍞 탄수화물</div>
+                <div class="nutrition-value carbs">{{ item.analysis.carbs_value }}{{ item.analysis.carbs_unit or 'g' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.sugar_value %}
+              <div class="nutrition-item sugar">
+                <div class="nutrition-label">🍬 당류</div>
+                <div class="nutrition-value sugar">{{ item.analysis.sugar_value }}{{ item.analysis.sugar_unit or 'g' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.protein_value %}
+              <div class="nutrition-item protein">
+                <div class="nutrition-label">💪 단백질</div>
+                <div class="nutrition-value protein">{{ item.analysis.protein_value }}{{ item.analysis.protein_unit or 'g' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.fat_value %}
+              <div class="nutrition-item fat">
+                <div class="nutrition-label">🧈 지방</div>
+                <div class="nutrition-value fat">{{ item.analysis.fat_value }}{{ item.analysis.fat_unit or 'g' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.saturated_fat_value %}
+              <div class="nutrition-item saturated-fat">
+                <div class="nutrition-label">🔸 포화지방</div>
+                <div class="nutrition-value saturated-fat">{{ item.analysis.saturated_fat_value }}{{ item.analysis.saturated_fat_unit or 'g' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.trans_fat_value %}
+              <div class="nutrition-item trans-fat">
+                <div class="nutrition-label">⚠️ 트랜스지방</div>
+                <div class="nutrition-value trans-fat">{{ item.analysis.trans_fat_value }}{{ item.analysis.trans_fat_unit or 'g' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.cholesterol_value %}
+              <div class="nutrition-item cholesterol">
+                <div class="nutrition-label">💜 콜레스테롤</div>
+                <div class="nutrition-value cholesterol">{{ item.analysis.cholesterol_value }}{{ item.analysis.cholesterol_unit or 'mg' }}</div>
+              </div>
+              {% endif %}
+              
+              {% if item.analysis.sodium_value %}
+              <div class="nutrition-item sodium">
+                <div class="nutrition-label">🧂 나트륨</div>
+                <div class="nutrition-value sodium">{{ item.analysis.sodium_value }}{{ item.analysis.sodium_unit or 'mg' }}</div>
+              </div>
+              {% endif %}
+            </div>
+          {% else %}
+            <div class="no-data">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <p>추출된 영양 정보가 없습니다</p>
+            </div>
+          {% endif %}
+          
+          {% if item.analysis.allergens %}
+          <div class="allergen-section">
+            <div class="allergen-title">
+              <span>⚠️</span>
+              <span>알레르기 유발 성분</span>
+            </div>
+            <div class="allergen-tags">
+              {% for allergen in item.analysis.allergens %}
+                <span class="allergen-tag">{{ allergen }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- OCR Text Card -->
+      <div class="card full-width fade-in" style="animation-delay: 0.3s">
+        <div class="card-header">
+          <div class="icon icon-text">📝</div>
+          <h2>OCR 추출 텍스트</h2>
+        </div>
+        <div class="card-body">
+          <div class="ocr-text">{{ item.text or '텍스트를 추출할 수 없습니다.' }}</div>
+        </div>
+      </div>
+
+      {% if item.translated_text %}
+      <!-- Translation Card -->
+      <div class="card full-width fade-in" style="animation-delay: 0.4s">
+        <div class="card-header">
+          <div class="icon icon-translate">🌐</div>
+          <h2>번역 결과</h2>
+        </div>
+        <div class="card-body">
+          <div class="translated-text">{{ item.translated_text }}</div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Image Modal -->
+  <div class="modal" id="imageModal" onclick="closeModal()">
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <img src="{{ url_for('static', filename='uploads/' + item.filename) }}" alt="라벨 이미지">
+  </div>
+
+  <script>
+    function openModal() {
+      document.getElementById('imageModal').classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+      document.getElementById('imageModal').classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeModal();
+    });
+  </script>
 </body>
 </html>
