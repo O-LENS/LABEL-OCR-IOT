@@ -33,3 +33,8 @@ Flask 서버가 이를 OCR로 분석하여 다음 정보를 자동 추출하는 
       ▼
 [Web UI - 결과 시각화]
 
+
+---
+Windows 활성화:
+```
+.venv\Scripts\activate
