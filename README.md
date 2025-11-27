@@ -32,9 +32,46 @@ Flask 서버가 이를 OCR로 분석하여 다음 정보를 자동 추출하는 
       ├─ Papago → 번역 (선택)
       ▼
 [Web UI - 결과 시각화]
-
+```
 
 ---
-Windows 활성화:
+## Windows 활성화:
 ```
 .venv\Scripts\activate
+```
+
+## 패키지 설치
+```
+cd server
+pip install -r requirements.txt
+```
+
+## (옵션) Tesseract 설치
+
+다운로드 링크:
+```
+https://github.com/UB-Mannheim/tesseract/wiki
+```
+
+설치 후 app.py 내부 경로 설정:
+```
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract
+```
+
+## Flask 서버 실행
+```
+cd server
+python app.py
+```
+
+## 브라우저에서 접속:
+```
+http://127.0.0.1:5000
+```
+
+## 📸 Raspberry Pi 실행 방법
+
+라즈베리파이에서 아래 실행:
+```
+python3 raspi_client/capture_and_send.py
+```
