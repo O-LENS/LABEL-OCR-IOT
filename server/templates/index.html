@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>라벨 OCR 대시보드</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+    th { background: #f2f2f2; }
+    a { text-decoration: none; color: #007bff; }
+    .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .badge-sugar { background: #ffe0e0; }
+    .badge-sodium { background: #e0f0ff; }
+    .badge-allergen { background: #ffe9b3; }
+  </style>
+</head>
+<body>
+  <h1>라벨 OCR 대시보드</h1>
+  <p>최근에 업로드된 라벨 이미지와 OCR 결과 목록입니다.</p>
+
+  <h2>라벨 이미지 업로드</h2>
+  <form action="/api/upload" method="post" enctype="multipart/form-data">
+    <div>
+      <label>제품 이름(선택): </label>
+      <input type="text" name="label" placeholder="예: 초코우유">
+    </div>
+    <div style="margin-top:8px;">
+      <input type="file" name="file" accept="image/*" required>
+    </div>
+    <div style="margin-top:8px;">
+      <button type="submit">업로드해서 OCR 하기</button>
+    </div>
+  </form>
+
+  <hr>
+  
+  {% if results %}
+    <table>
+      <thead>
+        <tr>
+          <th>시간(UTC)</th>
+          <th>제품(라벨)</th>
+          <th>요약 정보</th>
+          <th>상세</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in results %}
+          <tr>
+            <td>{{ item.created_at }}</td>
+            <td>{{ item.label or '-' }}</td>
+            <td>
+              {% if item.analysis.sugar_value %}
+                <span class="badge badge-sugar">
+                  당류: {{ item.analysis.sugar_value }}{{ item.analysis.sugar_unit or 'g' }}
+                </span>
+              {% endif %}
+              {% if item.analysis.sodium_value %}
+                <span class="badge badge-sodium">
+                  나트륨: {{ item.analysis.sodium_value }}{{ item.analysis.sodium_unit or 'mg' }}
+                </span>
+              {% endif %}
+              {% if item.analysis.allergens %}
+                <span class="badge badge-allergen">
+                  알레르기: {{ item.analysis.allergens|join(', ') }}
+                </span>
+              {% endif %}
+            </td>
+            <td><a href="{{ url_for('detail', item_id=item.id) }}">보기</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>아직 업로드된 라벨이 없습니다.</p>
+  {% endif %}
+</body>
+</html>

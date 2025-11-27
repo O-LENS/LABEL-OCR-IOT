@@ -1,0 +1,90 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.log
+
+# 가상환경 (어떤 이름이든 제외)
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# -------------------------
+# Flask / Web
+# -------------------------
+instance/
+*.db
+*.sqlite3
+
+# 업로드된 이미지 (원본 이미지 너무 커질 수 있음)
+server/static/uploads/*
+!server/static/uploads/.gitkeep
+
+# -------------------------
+# OS / IDE
+# -------------------------
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# -------------------------
+# PyTorch / 모델 / 캐시
+# -------------------------
+*.pt
+*.pth
+*.onnx
+*.npz
+
+# EasyOCR 캐시
+~/.EasyOCR/
+
+# Torch Hub 캐시
+~/.cache/torch/
+torch_cache/
+
+# -------------------------
+# Build / Dist
+# -------------------------
+build/
+dist/
+*.egg-info/
+*.egg
+
+# -------------------------
+# Secrets / Keys
+# -------------------------
+# (API 키, Papago 키, DB 비밀번호 등을 커밋하면 절대 안 됨)
+*.env
+.env
+secret.json
+config.json
+
+# -------------------------
+# Raspberry Pi
+# -------------------------
+__pycache__/
+*.log
+
+# -------------------------
+# 프로젝트 임시 파일
+# -------------------------
+*.tmp
+*.bak
+*.swp
+*.swo
