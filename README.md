@@ -6,9 +6,9 @@
 ## 📌 프로젝트 개요
 
 **LABEL-OCR-IOT**는 라즈베리파이 5 카메라를 이용해 식품 라벨을 촬영하고,  
-Flask 서버가 이를 OCR로 분석하여 다음 정보를 자동 추출하는 프로젝트입니다.
+Flask 서버가 Tesseract OCR로 분석하여 다음 정보를 자동 추출하는 프로젝트입니다.
 
-- 🔤 **OCR 텍스트 인식 (EasyOCR 기반)**
+- 🔤 **OCR 텍스트 인식 (Tesseract 기반)**
 - 🧂 **영양성분 자동 추출 (당류/나트륨 탐지)**
 - ⚠️ **알레르기 유발 식품 자동 검출 (우유, 견과류, 계란, 땅콩 등)**
 - 🌐 **Papago API 기반 번역 기능**
@@ -27,7 +27,7 @@ Flask 서버가 이를 OCR로 분석하여 다음 정보를 자동 추출하는 
       ▼
 [Flask Server - OCR/분석]
       │
-      ├─ EasyOCR → 텍스트 추출
+      ├─ Tesseract → 텍스트 추출
       ├─ Regex → 당류·나트륨·알레르기 검출
       ├─ Papago → 번역 (선택)
       ▼
@@ -46,17 +46,16 @@ cd server
 pip install -r requirements.txt
 ```
 
-## (옵션) Tesseract 설치
+## Tesseract 설치
 
 다운로드 링크:
 ```
 https://github.com/UB-Mannheim/tesseract/wiki
 ```
 
-설치 후 app.py 내부 경로 설정:
-```
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract
-```
+설치 후 아래 중 하나로 실행 경로를 지정하세요:
+- 시스템 PATH에 `tesseract`를 추가
+- 또는 환경 변수 `TESSERACT_CMD`에 바이너리 경로 지정
 
 ## Flask 서버 실행
 ```
