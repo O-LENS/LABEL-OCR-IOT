@@ -63,29 +63,35 @@ def init_oled():
         return None
 
 
-def oled_display(lines):
-    """OLED에 여러 줄 텍스트 표시"""
+def oled_display(lines, invert=True):
+    """OLED에 여러 줄 텍스트 표시 (흰 배경, 큰 글씨)"""
     if not OLED_DEVICE:
         return
     
     try:
         with canvas(OLED_DEVICE) as draw:
-            # 한글 폰트 로드 시도
+            # 흰 배경 (반전 모드)
+            if invert:
+                draw.rectangle((0, 0, 128, 64), fill="white")
+                text_color = "black"
+            else:
+                text_color = "white"
+            
+            # 큰 한글 폰트 로드
             try:
-                # 라즈베리파이 기본 한글 폰트
-                font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 12)
+                font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 14)
             except:
                 try:
-                    font = ImageFont.truetype("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf", 12)
+                    font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 14)
                 except:
                     font = ImageFont.load_default()
             
-            y = 0
-            line_height = 14
+            y = 2
+            line_height = 16
             for line in lines:
-                if y + line_height > 64:  # 화면 초과 방지
+                if y + line_height > 62:
                     break
-                draw.text((0, y), line, font=font, fill="white")
+                draw.text((3, y), line, font=font, fill=text_color)
                 y += line_height
                 
     except Exception as e:
@@ -93,14 +99,13 @@ def oled_display(lines):
 
 
 def oled_show_result(analysis):
-    """분석 결과를 OLED에 표시 (당류, 나트륨, 알레르기)"""
+    """분석 결과를 OLED에 표시 (당류, 나트륨, 알레르기) - 큰 글씨"""
     if not OLED_DEVICE:
         return
     
     lines = []
-    lines.append("=== 분석 결과 ===")
     
-    # 당류
+    # 당류 (소수점 포함)
     sugar = analysis.get("sugar_value")
     if sugar:
         sugar_unit = analysis.get("sugar_unit", "g")
@@ -108,7 +113,7 @@ def oled_show_result(analysis):
     else:
         lines.append("당류: -")
     
-    # 나트륨
+    # 나트륨 (소수점 포함)
     sodium = analysis.get("sodium_value")
     if sodium:
         sodium_unit = analysis.get("sodium_unit", "mg")
@@ -116,24 +121,45 @@ def oled_show_result(analysis):
     else:
         lines.append("나트륨: -")
     
-    # 알레르기
+    # 알레르기 (짧게 표시)
     allergens = analysis.get("allergens")
     if allergens:
-        allergen_text = ", ".join(allergens[:3])  # 최대 3개
-        if len(allergens) > 3:
+        allergen_text = ",".join(allergens[:2])  # 최대 2개
+        if len(allergens) > 2:
             allergen_text += "..."
-        lines.append(f"알레르기: {allergen_text}")
+        lines.append(f"알러지:{allergen_text}")
     else:
-        lines.append("알레르기: 없음")
+        lines.append("알러지: 없음")
     
     oled_display(lines)
 
 
 def oled_show_message(message):
-    """OLED에 단일 메시지 표시"""
+    """OLED에 단일 메시지 표시 (화면 중앙)"""
     if not OLED_DEVICE:
         return
-    oled_display([message])
+    
+    try:
+        with canvas(OLED_DEVICE) as draw:
+            # 흰 배경
+            draw.rectangle((0, 0, 128, 64), fill="white")
+            
+            # 큰 폰트
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 16)
+            except:
+                font = ImageFont.load_default()
+            
+            # 중앙 정렬
+            bbox = draw.textbbox((0, 0), message, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            x = (128 - text_width) // 2
+            y = (64 - text_height) // 2
+            
+            draw.text((x, y), message, font=font, fill="black")
+    except Exception as e:
+        print(f"[OLED 오류] {e}")
 
 
 def speak(text):
