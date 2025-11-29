@@ -1,10 +1,12 @@
 from pathlib import Path
-import easyocr
+
 import cv2
 import numpy as np
+import pytesseract
+from pytesseract import Output
 
-# EasyOCR Reader - 한 번만 로드
-reader = easyocr.Reader(['ko', 'en'], gpu=False)
+TESSERACT_LANG = "kor+eng"
+TESSERACT_CONFIG = "--oem 3 --psm 6 -c preserve_interword_spaces=1"
 
 
 def resize_image(img: np.ndarray, target_width: int = 1200) -> np.ndarray:
@@ -97,7 +99,14 @@ def preprocess_invert(image_path: str) -> np.ndarray:
     return enhanced
 
 
-def run_ocr(image_path: str, lang: str = "kor+eng") -> str:
+def _tesseract_text(img: np.ndarray, lang: str) -> str:
+    """
+    Tesseract 이미지 문자열 추출 헬퍼
+    """
+    return pytesseract.image_to_string(img, lang=lang, config=TESSERACT_CONFIG)
+
+
+def run_ocr(image_path: str, lang: str = TESSERACT_LANG) -> str:
     """
     강화된 OCR 실행
     - 여러 전처리 방식으로 OCR 수행
@@ -107,85 +116,49 @@ def run_ocr(image_path: str, lang: str = "kor+eng") -> str:
     if not image_path.exists():
         raise FileNotFoundError(f"이미지를 찾을 수 없음: {image_path}")
 
-    all_texts = []
-    
-    # 1. 원본 이미지 OCR
-    try:
-        result = reader.readtext(
-            str(image_path),
-            detail=0,
-            paragraph=False,
-            min_size=5,
-            text_threshold=0.5,
-            low_text=0.3,
-            contrast_ths=0.1,
-            adjust_contrast=0.5,
-            width_ths=0.7,
-        )
-        all_texts.extend(result)
-    except Exception as e:
-        print(f"[OCR 원본 오류] {e}")
+    original = cv2.imread(str(image_path))
+    if original is None:
+        raise FileNotFoundError(f"이미지를 찾을 수 없음: {image_path}")
 
-    # 2. 기본 전처리 OCR
+    all_texts = []
+    variants = []
+
+    variants.append(("원본", original))
+
     try:
-        preprocessed = preprocess_image(str(image_path))
-        result = reader.readtext(
-            preprocessed,
-            detail=0,
-            paragraph=False,
-            min_size=5,
-            text_threshold=0.4,
-            low_text=0.3,
-        )
-        all_texts.extend(result)
+        variants.append(("전처리", preprocess_image(str(image_path))))
     except Exception as e:
         print(f"[OCR 전처리 오류] {e}")
 
-    # 3. 표 형식 전처리 OCR
     try:
-        table_preprocessed = preprocess_for_table(str(image_path))
-        result = reader.readtext(
-            table_preprocessed,
-            detail=0,
-            paragraph=False,
-            min_size=5,
-            text_threshold=0.4,
-        )
-        all_texts.extend(result)
+        variants.append(("표 전처리", preprocess_for_table(str(image_path))))
     except Exception as e:
         print(f"[OCR 표 전처리 오류] {e}")
 
-    # 4. 반전 이미지 OCR
     try:
-        inverted = preprocess_invert(str(image_path))
-        result = reader.readtext(
-            inverted,
-            detail=0,
-            paragraph=False,
-            min_size=5,
-            text_threshold=0.5,
-        )
-        all_texts.extend(result)
+        variants.append(("반전", preprocess_invert(str(image_path))))
     except Exception as e:
         print(f"[OCR 반전 오류] {e}")
 
-    # 5. 적응형 이진화 OCR
     try:
-        img = cv2.imread(str(image_path))
-        img = resize_image(img)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        resized = resize_image(original.copy())
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
         binary = cv2.adaptiveThreshold(
             gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
         )
-        result = reader.readtext(
-            binary,
-            detail=0,
-            paragraph=False,
-            min_size=5,
-        )
-        all_texts.extend(result)
+        variants.append(("적응형 이진화", binary))
     except Exception as e:
         print(f"[OCR 이진화 오류] {e}")
+
+    for variant_name, img in variants:
+        if img is None:
+            continue
+        try:
+            text = _tesseract_text(img, lang)
+            if text:
+                all_texts.extend(text.splitlines())
+        except pytesseract.TesseractError as e:
+            print(f"[Tesseract 오류 - {variant_name}] {e}")
 
     # 중복 제거 및 정리
     seen = set()
@@ -200,7 +173,7 @@ def run_ocr(image_path: str, lang: str = "kor+eng") -> str:
     return "\n".join(unique_texts)
 
 
-def run_ocr_with_confidence(image_path: str) -> list:
+def run_ocr_with_confidence(image_path: str, lang: str = TESSERACT_LANG) -> list:
     """
     신뢰도 정보와 함께 OCR 결과 반환
     """
@@ -209,20 +182,43 @@ def run_ocr_with_confidence(image_path: str) -> list:
         raise FileNotFoundError(f"이미지를 찾을 수 없음: {image_path}")
 
     preprocessed = preprocess_image(str(image_path))
-    
-    results = reader.readtext(
-        preprocessed,
-        detail=1,
-        paragraph=False,
-        min_size=5,
-        text_threshold=0.4,
-    )
-    
-    return [
-        {
-            "text": text,
-            "confidence": round(conf * 100, 1),
-            "bbox": bbox
-        }
-        for bbox, text, conf in results
-    ]
+
+    try:
+        data = pytesseract.image_to_data(
+            preprocessed,
+            lang=lang,
+            config=TESSERACT_CONFIG,
+            output_type=Output.DICT,
+        )
+    except pytesseract.TesseractError as e:
+        raise RuntimeError(f"Tesseract 실행 실패: {e}") from e
+
+    results = []
+    n_items = len(data["text"])
+    for i in range(n_items):
+        text = data["text"][i].strip()
+        conf = data["conf"][i]
+        if not text or conf == "-1":
+            continue
+
+        x, y, w, h = (
+            data["left"][i],
+            data["top"][i],
+            data["width"][i],
+            data["height"][i],
+        )
+        bbox = [
+            [x, y],
+            [x + w, y],
+            [x + w, y + h],
+            [x, y + h],
+        ]
+        results.append(
+            {
+                "text": text,
+                "confidence": round(float(conf), 1),
+                "bbox": bbox,
+            }
+        )
+
+    return results

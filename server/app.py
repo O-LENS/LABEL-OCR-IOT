@@ -10,7 +10,7 @@ import pytesseract
 from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any, Tuple
 
-from ocr_utils import run_ocr  # EasyOCR 사용 함수
+from ocr_utils import run_ocr  # Tesseract 기반 OCR 함수
 
 
 # ===================== Flask / 경로 설정 =====================
@@ -29,9 +29,11 @@ app = Flask(
 app.config['JSON_AS_ASCII'] = False
 
 
-# ===================== (선택) Tesseract 경로 설정 =====================
-# - EasyOCR이 주 OCR이지만 필요할 수 있어 남김
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# ===================== Tesseract 경로 설정 =====================
+# - OS마다 경로가 다르므로 환경변수(TESSERACT_CMD)로 오버라이드
+TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
+if TESSERACT_CMD:
+    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 
 # ===================== 번역 (지금은 동작 안 되어도 유지) =====================
