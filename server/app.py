@@ -30,17 +30,33 @@ app.config['JSON_AS_ASCII'] = False
 
 
 # ===================== Tesseract 경로 설정 =====================
-# - OS마다 경로가 다르므로 환경변수(TESSERACT_CMD)로 오버라이드
-TESSERACT_CMD = os.environ.get("TESSERACT_CMD")
-if TESSERACT_CMD:
-    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+# Windows: C:\Program Files\Tesseract-OCR\tesseract.exe
+# Linux: /usr/bin/tesseract (기본 PATH에 있음)
+import platform
+
+if platform.system() == "Windows":
+    TESSERACT_CMD = os.environ.get("TESSERACT_CMD", r"C:\Program Files\Tesseract-OCR\tesseract.exe")
+else:
+    TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
+
+pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 
-# ===================== 번역 (지금은 동작 안 되어도 유지) =====================
+# ===================== 파파고 번역 설정 =====================
+# 환경변수로 API 키 설정 (또는 직접 입력)
+# 네이버 클라우드 플랫폼에서 발급: https://www.ncloud.com/product/aiService/papagoTranslation
 
-PAPAGO_CLIENT_ID = ""  # 필요하면 넣기
-PAPAGO_CLIENT_SECRET = ""
-PAPAGO_URL = "https://naveropenapi.apigw.ntruss.com/nmt/v1/translation"
+PAPAGO_CLIENT_ID = os.environ.get("PAPAGO_CLIENT_ID", "g9xnxdmfwy")
+PAPAGO_CLIENT_SECRET = os.environ.get("PAPAGO_CLIENT_SECRET", "PGqk4FMFGSDpFY1CtC0tDX6mFZewtMaGgxnIZrWX")
+
+# 네이버 클라우드 플랫폼 API (ncloud.com)
+# PAPAGO_URL = "https://naveropenapi.apigw.ntruss.com/nmt/v1/translation"
+
+# 네이버 개발자 센터 API (developers.naver.com)
+PAPAGO_URL = "https://openapi.naver.com/v1/papago/n2mt"
+
+# 번역 활성화 여부 (True로 설정하면 영어 텍스트를 한국어로 번역)
+ENABLE_TRANSLATION = os.environ.get("ENABLE_TRANSLATION", "true").lower() == "true"
 
 
 def guess_lang_pair(text: str) -> Tuple[str, str]:
@@ -60,9 +76,9 @@ def translate_text_papago(text: str) -> str:
     source, target = guess_lang_pair(text)
 
     headers = {
-        "X-NCP-APIGW-API-KEY-ID": PAPAGO_CLIENT_ID,
-        "X-NCP-APIGW-API-KEY": PAPAGO_CLIENT_SECRET,
-        "Content-Type": "application/json; charset=utf-8",
+        "X-Naver-Client-Id": PAPAGO_CLIENT_ID,
+        "X-Naver-Client-Secret": PAPAGO_CLIENT_SECRET,
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     }
 
     payload = {
@@ -72,7 +88,7 @@ def translate_text_papago(text: str) -> str:
     }
 
     try:
-        resp = requests.post(PAPAGO_URL, headers=headers, json=payload, timeout=10)
+        resp = requests.post(PAPAGO_URL, headers=headers, data=payload, timeout=10)
         resp.raise_for_status()
         return resp.json()["message"]["result"]["translatedText"]
     except Exception as e:
@@ -409,9 +425,13 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
     # 원본 텍스트에서도 검색 (공백 제거 버전)
     text_no_space = re.sub(r"\s+", "", text)
     
+    # 디버깅: 알레르기 검색 대상 텍스트 출력
+    print(f"[알레르기 검색] 공백제거 텍스트 일부: {text_no_space[:300]}...")
+    
     # 1. 안전한 키워드(2글자 이상) - 전체 텍스트에서 검색
     for kw in ALLERGEN_KEYWORDS_SAFE:
         if kw in norm_text or kw in text_no_space:
+            print(f"[알레르기 발견] '{kw}' 감지!")
             found_allergens.add(kw)
     
     # 2. 알레르기 관련 섹션 패턴들
@@ -594,6 +614,139 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
     )
 
 
+def extract_nutrition_and_allergens_english(text: str) -> NutritionInfo:
+    """
+    영어 영양정보 라벨에서 추출
+    """
+    norm_text = re.sub(r"\s+", " ", text.lower())
+    
+    # 영어 패턴 정의
+    def extract_en(patterns):
+        for pattern in patterns:
+            match = re.search(pattern, norm_text, re.IGNORECASE)
+            if match:
+                try:
+                    value = float(match.group(1).replace(",", "."))
+                    unit = match.group(2) if len(match.groups()) > 1 else None
+                    return value, unit
+                except (ValueError, IndexError):
+                    continue
+        return None, None
+    
+    # Calories
+    cal_value, cal_unit = extract_en([
+        r"calories?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(kcal|cal)?",
+        r"energy\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(kcal|kj)?",
+    ])
+    
+    # Carbohydrates
+    carbs_value, carbs_unit = extract_en([
+        r"(?:total\s+)?carbohydrate[s]?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+        r"carbs?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+    ])
+    
+    # Sugar
+    sugar_value, sugar_unit = extract_en([
+        r"(?:total\s+)?sugar[s]?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+    ])
+    
+    # Protein
+    protein_value, protein_unit = extract_en([
+        r"protein[s]?\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+    ])
+    
+    # Fat
+    fat_value, fat_unit = extract_en([
+        r"(?:total\s+)?fat\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+    ])
+    
+    # Saturated Fat
+    sat_fat_value, sat_fat_unit = extract_en([
+        r"saturated\s*fat\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+    ])
+    
+    # Trans Fat
+    trans_fat_value, trans_fat_unit = extract_en([
+        r"trans\s*fat\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(g|mg)?",
+    ])
+    
+    # Cholesterol
+    chol_value, chol_unit = extract_en([
+        r"cholesterol\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(mg|g)?",
+    ])
+    
+    # Sodium
+    sodium_value, sodium_unit = extract_en([
+        r"sodium\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(mg|g)?",
+    ])
+    
+    # 영어 알레르기 성분
+    en_allergens = [
+        "milk", "egg", "peanut", "tree nut", "soy", "wheat", "fish", "shellfish",
+        "sesame", "gluten", "lactose", "almond", "walnut", "cashew", "hazelnut",
+        "pecan", "pistachio", "macadamia", "shrimp", "crab", "lobster", "clam",
+        "oyster", "squid", "octopus", "mussel", "scallop"
+    ]
+    
+    found = []
+    allergen_section = re.search(r"(?:contains|allergen|allergy)[:\s]+(.+?)(?:\.|$)", norm_text, re.IGNORECASE)
+    search_text = allergen_section.group(1) if allergen_section else norm_text
+    
+    for allergen in en_allergens:
+        if re.search(rf"\b{allergen}\b", search_text, re.IGNORECASE):
+            found.append(allergen)
+    
+    return NutritionInfo(
+        calories_value=cal_value,
+        calories_unit=cal_unit or "kcal" if cal_value else None,
+        carbs_value=carbs_value,
+        carbs_unit=carbs_unit or "g" if carbs_value else None,
+        sugar_value=sugar_value,
+        sugar_unit=sugar_unit or "g" if sugar_value else None,
+        protein_value=protein_value,
+        protein_unit=protein_unit or "g" if protein_value else None,
+        fat_value=fat_value,
+        fat_unit=fat_unit or "g" if fat_value else None,
+        saturated_fat_value=sat_fat_value,
+        saturated_fat_unit=sat_fat_unit or "g" if sat_fat_value else None,
+        trans_fat_value=trans_fat_value,
+        trans_fat_unit=trans_fat_unit or "g" if trans_fat_value else None,
+        cholesterol_value=chol_value,
+        cholesterol_unit=chol_unit or "mg" if chol_value else None,
+        sodium_value=sodium_value,
+        sodium_unit=sodium_unit or "mg" if sodium_value else None,
+        serving_size=None,
+        allergens=found or None,
+    )
+
+
+def merge_nutrition(primary: NutritionInfo, secondary: NutritionInfo) -> NutritionInfo:
+    """
+    두 영양정보를 병합 (primary 우선, None인 경우 secondary로 보완)
+    """
+    return NutritionInfo(
+        calories_value=primary.calories_value or secondary.calories_value,
+        calories_unit=primary.calories_unit or secondary.calories_unit,
+        carbs_value=primary.carbs_value or secondary.carbs_value,
+        carbs_unit=primary.carbs_unit or secondary.carbs_unit,
+        sugar_value=primary.sugar_value or secondary.sugar_value,
+        sugar_unit=primary.sugar_unit or secondary.sugar_unit,
+        protein_value=primary.protein_value or secondary.protein_value,
+        protein_unit=primary.protein_unit or secondary.protein_unit,
+        fat_value=primary.fat_value or secondary.fat_value,
+        fat_unit=primary.fat_unit or secondary.fat_unit,
+        saturated_fat_value=primary.saturated_fat_value or secondary.saturated_fat_value,
+        saturated_fat_unit=primary.saturated_fat_unit or secondary.saturated_fat_unit,
+        trans_fat_value=primary.trans_fat_value or secondary.trans_fat_value,
+        trans_fat_unit=primary.trans_fat_unit or secondary.trans_fat_unit,
+        cholesterol_value=primary.cholesterol_value or secondary.cholesterol_value,
+        cholesterol_unit=primary.cholesterol_unit or secondary.cholesterol_unit,
+        sodium_value=primary.sodium_value or secondary.sodium_value,
+        sodium_unit=primary.sodium_unit or secondary.sodium_unit,
+        serving_size=primary.serving_size or secondary.serving_size,
+        allergens=primary.allergens or secondary.allergens,
+    )
+
 
 def nutrition_to_dict(info: NutritionInfo) -> Dict[str, Any]:
     return asdict(info)
@@ -641,10 +794,32 @@ def api_upload():
     text = run_ocr(str(save_path), lang="kor+eng")
     
     # 디버그: OCR 결과 출력
-    print(f"[OCR 결과]\n{text[:500]}...")
+    print(f"[OCR 원본 - 전체]\n{text}\n{'='*50}")
 
-    # 분석
-    nutrition = extract_nutrition_and_allergens(text)
+    # 영어 텍스트인 경우 한국어로 번역
+    translated = ""
+    analysis_text = text  # 분석에 사용할 텍스트
+    
+    if ENABLE_TRANSLATION and PAPAGO_CLIENT_ID and PAPAGO_CLIENT_SECRET:
+        # 영어가 주로 포함된 경우 번역
+        korean_chars = len(re.findall(r'[가-힣]', text))
+        english_chars = len(re.findall(r'[a-zA-Z]', text))
+        
+        if english_chars > korean_chars:
+            print("[번역] 영어 텍스트 감지 → 한국어로 번역 중...")
+            translated = translate_text_papago(text)
+            if translated:
+                print(f"[번역 결과]\n{translated[:500]}...")
+                analysis_text = translated  # 번역된 텍스트로 분석
+    
+    # 분석 (번역된 텍스트 또는 원본 사용)
+    nutrition = extract_nutrition_and_allergens(analysis_text)
+    
+    # 영어 원본에서도 추가 분석 (번역이 부정확할 경우 대비)
+    if translated:
+        nutrition_original = extract_nutrition_and_allergens_english(text)
+        # 번역 분석에서 못 찾은 값은 영어 분석으로 보완
+        nutrition = merge_nutrition(nutrition, nutrition_original)
     
     # 디버그: 영양 정보 출력 (상세)
     print(f"[영양 분석]")
@@ -655,9 +830,6 @@ def api_upload():
     print(f"  지방: {nutrition.fat_value} {nutrition.fat_unit or ''}")
     print(f"  나트륨: {nutrition.sodium_value} {nutrition.sodium_unit or ''}")
     print(f"  알레르기: {nutrition.allergens}")
-
-    # 번역 (OFF이어도 안전)
-    translated = translate_text_papago(text)
 
     result = {
         "id": item_id,

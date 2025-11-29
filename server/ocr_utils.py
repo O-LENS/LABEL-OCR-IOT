@@ -6,10 +6,13 @@ import pytesseract
 from pytesseract import Output
 
 TESSERACT_LANG = "kor+eng"
+# PSM 모드: 3=자동, 6=단일블록, 11=희소텍스트, 12=희소+OSD
 TESSERACT_CONFIG = "--oem 3 --psm 6 -c preserve_interword_spaces=1"
+TESSERACT_CONFIG_SPARSE = "--oem 3 --psm 11 -c preserve_interword_spaces=1"
+TESSERACT_CONFIG_AUTO = "--oem 3 --psm 3 -c preserve_interword_spaces=1"
 
 
-def resize_image(img: np.ndarray, target_width: int = 1200) -> np.ndarray:
+def resize_image(img: np.ndarray, target_width: int = 1800) -> np.ndarray:
     """이미지 리사이즈 - OCR 성능 향상"""
     h, w = img.shape[:2]
     if w < target_width:
@@ -99,11 +102,11 @@ def preprocess_invert(image_path: str) -> np.ndarray:
     return enhanced
 
 
-def _tesseract_text(img: np.ndarray, lang: str) -> str:
+def _tesseract_text(img: np.ndarray, lang: str, config: str = TESSERACT_CONFIG) -> str:
     """
     Tesseract 이미지 문자열 추출 헬퍼
     """
-    return pytesseract.image_to_string(img, lang=lang, config=TESSERACT_CONFIG)
+    return pytesseract.image_to_string(img, lang=lang, config=config)
 
 
 def run_ocr(image_path: str, lang: str = TESSERACT_LANG) -> str:
@@ -150,15 +153,34 @@ def run_ocr(image_path: str, lang: str = TESSERACT_LANG) -> str:
     except Exception as e:
         print(f"[OCR 이진화 오류] {e}")
 
+    # 추가: 더 크게 확대한 버전 (작은 글씨용)
+    try:
+        large_resized = resize_image(original.copy(), target_width=2500)
+        gray_large = cv2.cvtColor(large_resized, cv2.COLOR_BGR2GRAY)
+        # 강한 대비
+        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+        enhanced_large = clahe.apply(gray_large)
+        variants.append(("대형 확대", enhanced_large))
+    except Exception as e:
+        print(f"[OCR 대형 확대 오류] {e}")
+
+    # 여러 PSM 모드로 OCR 시도
+    configs = [
+        ("기본", TESSERACT_CONFIG),
+        ("자동", TESSERACT_CONFIG_AUTO),
+        ("희소", TESSERACT_CONFIG_SPARSE),
+    ]
+    
     for variant_name, img in variants:
         if img is None:
             continue
-        try:
-            text = _tesseract_text(img, lang)
-            if text:
-                all_texts.extend(text.splitlines())
-        except pytesseract.TesseractError as e:
-            print(f"[Tesseract 오류 - {variant_name}] {e}")
+        for config_name, config in configs:
+            try:
+                text = _tesseract_text(img, lang, config)
+                if text:
+                    all_texts.extend(text.splitlines())
+            except pytesseract.TesseractError as e:
+                print(f"[Tesseract 오류 - {variant_name}/{config_name}] {e}")
 
     # 중복 제거 및 정리
     seen = set()
