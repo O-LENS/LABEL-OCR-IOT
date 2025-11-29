@@ -14,6 +14,17 @@ except ImportError:
     print("[경고] gTTS가 설치되지 않았습니다. pip install gtts 로 설치하세요.")
     TTS_AVAILABLE = False
 
+# OLED 디스플레이 (luma.oled 사용)
+try:
+    from luma.core.interface.serial import i2c
+    from luma.oled.device import ssd1306, sh1106
+    from luma.core.render import canvas
+    from PIL import ImageFont
+    OLED_AVAILABLE = True
+except ImportError:
+    print("[경고] luma.oled가 설치되지 않았습니다. pip install luma.oled 로 설치하세요.")
+    OLED_AVAILABLE = False
+
 # 서버 주소 (필요하면 IP로 바꿔라)
 SERVER_URL = "http://127.0.0.1:5000/api/upload"
 
@@ -23,6 +34,106 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 # TTS 음성 파일 경로
 TTS_FILE = "/tmp/tts_output.mp3"
+
+# ===================== OLED 디스플레이 설정 =====================
+OLED_DEVICE = None
+
+def init_oled():
+    """OLED 디스플레이 초기화"""
+    global OLED_DEVICE
+    
+    if not OLED_AVAILABLE:
+        return None
+    
+    try:
+        # I2C 연결 (기본 주소: 0x3C)
+        serial = i2c(port=1, address=0x3C)
+        
+        # SSD1306 또는 SH1106 시도
+        try:
+            OLED_DEVICE = ssd1306(serial, width=128, height=64)
+            print("[OLED] SSD1306 초기화 성공")
+        except:
+            OLED_DEVICE = sh1106(serial, width=128, height=64)
+            print("[OLED] SH1106 초기화 성공")
+        
+        return OLED_DEVICE
+    except Exception as e:
+        print(f"[OLED 오류] 초기화 실패: {e}")
+        return None
+
+
+def oled_display(lines):
+    """OLED에 여러 줄 텍스트 표시"""
+    if not OLED_DEVICE:
+        return
+    
+    try:
+        with canvas(OLED_DEVICE) as draw:
+            # 한글 폰트 로드 시도
+            try:
+                # 라즈베리파이 기본 한글 폰트
+                font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothic.ttf", 12)
+            except:
+                try:
+                    font = ImageFont.truetype("/usr/share/fonts/truetype/fonts-japanese-gothic.ttf", 12)
+                except:
+                    font = ImageFont.load_default()
+            
+            y = 0
+            line_height = 14
+            for line in lines:
+                if y + line_height > 64:  # 화면 초과 방지
+                    break
+                draw.text((0, y), line, font=font, fill="white")
+                y += line_height
+                
+    except Exception as e:
+        print(f"[OLED 오류] 표시 실패: {e}")
+
+
+def oled_show_result(analysis):
+    """분석 결과를 OLED에 표시 (당류, 나트륨, 알레르기)"""
+    if not OLED_DEVICE:
+        return
+    
+    lines = []
+    lines.append("=== 분석 결과 ===")
+    
+    # 당류
+    sugar = analysis.get("sugar_value")
+    if sugar:
+        sugar_unit = analysis.get("sugar_unit", "g")
+        lines.append(f"당류: {sugar}{sugar_unit}")
+    else:
+        lines.append("당류: -")
+    
+    # 나트륨
+    sodium = analysis.get("sodium_value")
+    if sodium:
+        sodium_unit = analysis.get("sodium_unit", "mg")
+        lines.append(f"나트륨: {sodium}{sodium_unit}")
+    else:
+        lines.append("나트륨: -")
+    
+    # 알레르기
+    allergens = analysis.get("allergens")
+    if allergens:
+        allergen_text = ", ".join(allergens[:3])  # 최대 3개
+        if len(allergens) > 3:
+            allergen_text += "..."
+        lines.append(f"알레르기: {allergen_text}")
+    else:
+        lines.append("알레르기: 없음")
+    
+    oled_display(lines)
+
+
+def oled_show_message(message):
+    """OLED에 단일 메시지 표시"""
+    if not OLED_DEVICE:
+        return
+    oled_display([message])
 
 
 def speak(text):
@@ -125,9 +236,11 @@ def countdown(seconds=3):
     
     for i in range(seconds, 0, -1):
         print(f"  ⏱️  {i}...")
+        oled_show_message(f"촬영 대기: {i}초")
         time.sleep(1)
     
     print("  📸 찰칵!")
+    oled_show_message("촬영 중...")
 
 
 def capture_image():
@@ -163,6 +276,7 @@ def upload_image(filepath):
         headers = {"Accept": "application/json"}
 
         print("[…] 서버로 업로드 중…")
+        oled_show_message("분석 중...")
         response = requests.post(SERVER_URL, files=files, data=data, headers=headers)
 
     if response.status_code == 200:
@@ -172,12 +286,17 @@ def upload_image(filepath):
             result = response.json()
             print("서버 응답:", result)
             
+            # OLED에 결과 표시 (당류, 나트륨, 알레르기)
+            analysis = result.get("analysis", {})
+            oled_show_result(analysis)
+            
             # TTS로 결과 읽어주기
             speech_text = build_speech_text(result)
             speak(speech_text)
             
         except Exception as e:
             print(f"[경고] JSON 파싱 오류: {e}")
+            oled_show_message("분석 오류")
             speak("분석이 완료되었습니다.")
 
         # 임시 파일 삭제
@@ -194,6 +313,11 @@ def main():
     print("\n" + "="*50)
     print("  🏷️  라벨 OCR & 음성 안내 시스템")
     print("="*50)
+    
+    # OLED 초기화
+    init_oled()
+    if OLED_DEVICE:
+        oled_show_message("시스템 준비 완료")
     
     # 시작 안내
     speak("라벨 분석 시스템이 시작되었습니다. 촬영하려면 엔터를 누르세요.")
