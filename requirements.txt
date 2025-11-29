@@ -1,0 +1,31 @@
+# 기본
+numpy==1.26.4
+opencv-python-headless==4.11.0.86
+Pillow==10.2.0
+
+# Flask server
+Flask==3.0.1
+Werkzeug==3.1.3
+itsdangerous==2.1.2
+Jinja2==3.1.3
+click==8.1.7
+
+# EasyOCR 및 의존성
+easyocr==1.7.2
+python-bidi==0.4.2
+PyYAML==6.0.1
+scikit-image==0.22.0
+imageio==2.37.2
+
+# Torch (라즈베리파이 64bit 공식 wheel)
+torch==2.0.0
+torchvision==0.15.1
+
+# 기타
+requests==2.32.3
+typing_extensions==4.10.0
+scipy==1.11.4
+shapely==2.1.2
+networkx==3.2.1
+mpmath==1.3.0
+
