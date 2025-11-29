@@ -118,8 +118,23 @@ def build_speech_text(result):
     return " ".join(lines)
 
 
+def countdown(seconds=3):
+    """촬영 전 카운트다운"""
+    print(f"\n📷 {seconds}초 후 촬영합니다...")
+    speak(f"{seconds}초 후 촬영합니다.")
+    
+    for i in range(seconds, 0, -1):
+        print(f"  ⏱️  {i}...")
+        time.sleep(1)
+    
+    print("  📸 찰칵!")
+
+
 def capture_image():
     """라즈베리파이 카메라로 이미지 촬영"""
+    # 3초 카운트다운
+    countdown(3)
+    
     picam = Picamera2()
     picam.configure(picam.create_still_configuration())
     picam.start()
