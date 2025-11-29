@@ -46,14 +46,11 @@ pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 # 환경변수로 API 키 설정 (또는 직접 입력)
 # 네이버 클라우드 플랫폼에서 발급: https://www.ncloud.com/product/aiService/papagoTranslation
 
-PAPAGO_CLIENT_ID = os.environ.get("PAPAGO_CLIENT_ID", "g9xnxdmfwy")
-PAPAGO_CLIENT_SECRET = os.environ.get("PAPAGO_CLIENT_SECRET", "PGqk4FMFGSDpFY1CtC0tDX6mFZewtMaGgxnIZrWX")
+PAPAGO_CLIENT_ID = os.environ.get("PAPAGO_CLIENT_ID", "5v23u9jclu")
+PAPAGO_CLIENT_SECRET = os.environ.get("PAPAGO_CLIENT_SECRET", "c5tsieOQ3vF8rfHt9qFUo0BknJEZZbxYZW8s3IvJ")
 
 # 네이버 클라우드 플랫폼 API (ncloud.com)
-# PAPAGO_URL = "https://naveropenapi.apigw.ntruss.com/nmt/v1/translation"
-
-# 네이버 개발자 센터 API (developers.naver.com)
-PAPAGO_URL = "https://openapi.naver.com/v1/papago/n2mt"
+PAPAGO_URL = "https://naveropenapi.apigw.ntruss.com/nmt/v1/translation"
 
 # 번역 활성화 여부 (True로 설정하면 영어 텍스트를 한국어로 번역)
 ENABLE_TRANSLATION = os.environ.get("ENABLE_TRANSLATION", "true").lower() == "true"
@@ -76,9 +73,9 @@ def translate_text_papago(text: str) -> str:
     source, target = guess_lang_pair(text)
 
     headers = {
-        "X-Naver-Client-Id": PAPAGO_CLIENT_ID,
-        "X-Naver-Client-Secret": PAPAGO_CLIENT_SECRET,
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "X-NCP-APIGW-API-KEY-ID": PAPAGO_CLIENT_ID,
+        "X-NCP-APIGW-API-KEY": PAPAGO_CLIENT_SECRET,
+        "Content-Type": "application/json",
     }
 
     payload = {
@@ -88,7 +85,7 @@ def translate_text_papago(text: str) -> str:
     }
 
     try:
-        resp = requests.post(PAPAGO_URL, headers=headers, data=payload, timeout=10)
+        resp = requests.post(PAPAGO_URL, headers=headers, json=payload, timeout=10)
         resp.raise_for_status()
         return resp.json()["message"]["result"]["translatedText"]
     except Exception as e:
