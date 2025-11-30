@@ -13,3 +13,7 @@ gTTS>=2.3.0
 # 참고: 라즈베리파이에서 추가로 설치해야 할 것들
 # sudo apt-get install mpg321  (또는 mpg123)
 # sudo apt-get install ffmpeg  (aplay 사용시)
+<<<<<<< HEAD
+=======
+# sudo apt-get install fonts-nanum  (한글 폰트)
+>>>>>>> tesseract-version2
