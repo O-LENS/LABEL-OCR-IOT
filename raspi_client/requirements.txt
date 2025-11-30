@@ -4,9 +4,6 @@ requests>=2.28.0
 # TTS (음성 출력)
 gTTS>=2.3.0
 
-# OLED 디스플레이 (128x64 SSD1306/SH1106)
-luma.oled>=3.8.0
-
 # 라즈베리파이 카메라 (라즈베리파이 OS에 기본 포함)
 # picamera2
 
@@ -14,6 +11,3 @@ luma.oled>=3.8.0
 # sudo apt-get install mpg321  (또는 mpg123)
 # sudo apt-get install ffmpeg  (aplay 사용시)
 # sudo apt-get install fonts-nanum  (한글 폰트)
-
-# I2C 활성화 필요:
-# sudo raspi-config → Interface Options → I2C → Enable
