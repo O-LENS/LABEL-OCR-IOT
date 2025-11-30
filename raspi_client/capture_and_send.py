@@ -5,6 +5,7 @@ import os
 import subprocess
 from picamera2 import Picamera2
 from datetime import datetime
+from PIL import Image
 
 # TTS 라이브러리 (gTTS 사용)
 try:
@@ -139,13 +140,42 @@ def capture_image():
     picam = Picamera2()
     picam.configure(picam.create_still_configuration())
     picam.start()
-    time.sleep(1)  # 카메라 워밍업
+    
+    # 자동 포커스 설정 (libcamera 없이 문자열로 시도)
+    try:
+        picam.set_controls({"AfMode": 2})  # 2 = Auto focus mode
+        print("[카메라] 자동 포커스 모드 활성화")
+    except Exception as e:
+        print(f"[경고] 자동 포커스 설정 실패: {e}")
+    
+    time.sleep(2)  # 카메라 워밍업 및 자동 포커스 안정화 (2-3초 권장)
 
     filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     filepath = os.path.join(TEMP_DIR, filename)
 
     picam.capture_file(filepath)
     picam.stop()
+    
+    # 25% 줌인 효과: 이미지 후처리로 중앙 75% 영역 크롭
+    try:
+        img = Image.open(filepath)
+        width, height = img.size
+        
+        # 25% 줌인 = 중앙 75% 영역만 사용
+        zoom_factor = 0.75
+        crop_width = int(width * zoom_factor)
+        crop_height = int(height * zoom_factor)
+        left = (width - crop_width) // 2
+        top = (height - crop_height) // 2
+        right = left + crop_width
+        bottom = top + crop_height
+        
+        # 중앙 영역 크롭
+        cropped_img = img.crop((left, top, right, bottom))
+        cropped_img.save(filepath, quality=95)
+        print(f"[카메라] 25% 줌인 적용 (원본: {width}x{height} → 크롭: {crop_width}x{crop_height})")
+    except Exception as e:
+        print(f"[경고] 이미지 크롭 실패: {e}")
 
     print(f"[✓] 촬영 완료 → {filepath}")
     speak("촬영 완료. 분석 중입니다.")
