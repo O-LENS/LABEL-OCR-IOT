@@ -15,10 +15,7 @@ except ImportError:
     print("[경고] gTTS가 설치되지 않았습니다. pip install gtts 로 설치하세요.")
     TTS_AVAILABLE = False
 
-<<<<<<< HEAD
 
-=======
->>>>>>> tesseract-version2
 # 서버 주소 (필요하면 IP로 바꿔라)
 SERVER_URL = "http://127.0.0.1:5000/api/upload"
 

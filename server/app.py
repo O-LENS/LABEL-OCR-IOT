@@ -253,11 +253,14 @@ def normalize_ocr_text(text: str) -> str:
         "나트륨": "나트륨",
         "나트룸": "나트륨",
         "나튜륨": "나트륨",
-        # 당류 오타 (당료, 당루 등)
+        # 당류 오타 (당료, 당루, 담류 등)
         "당료": "당류",
         "당류류": "당류",
         "당루": "당류",
         "당류": "당류",
+        "담류": "당류",
+        "담 류": "당류",
+        "담류류": "당류",
         # 탄수화물 오타
         "단수화물": "탄수화물",
         "탄수화믈": "탄수화물",
@@ -375,6 +378,10 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
         re.compile(rf"{num}\s*(?P<unit>kcal|kca1|Kcal|킬로칼로리)", re.IGNORECASE),
         # 공백 없는 패턴
         re.compile(rf"(?:열량|칼로리){num}(?P<unit>kcal)?", re.IGNORECASE),
+        # "당 192kcal" 패턴 (1봉지당, 1회 제공량당 등)
+        re.compile(rf"당\s*{num}\s*(?P<unit>kcal|kca1|Kcal)", re.IGNORECASE),
+        # "192 kcal" 단독 (kcal 앞 숫자)
+        re.compile(rf"(?<![0-9]){num}\s*(?P<unit>kcal|kca1|Kcal|킬로칼로리)", re.IGNORECASE),
     ]
     calories_value, calories_unit = extract_value_unit(norm_text, calories_patterns)
     
@@ -385,6 +392,68 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
         if cal_compact_match:
             calories_value = float(cal_compact_match.group(1))
             calories_unit = cal_compact_match.group(2) or "kcal"
+    
+    # 추가: "XXXkcal" 패턴 직접 검색 (열량 키워드 없이)
+    if calories_value is None:
+        kcal_direct = re.search(r"(\d{2,4})\s*(?:kcal|kca1|Kcal)", norm_text, re.IGNORECASE)
+        if kcal_direct:
+            val = float(kcal_direct.group(1))
+            if 50 <= val <= 1500:  # 합리적인 열량 범위
+                calories_value = val
+                calories_unit = "kcal"
+    
+    # 추가: 공백 포함 "1 9 2 kcal" 패턴
+    if calories_value is None:
+        spaced_kcal = re.search(r"(\d)\s*(\d)\s*(\d)\s*(?:kcal|kca1)", norm_text, re.IGNORECASE)
+        if spaced_kcal:
+            val = float(spaced_kcal.group(1) + spaced_kcal.group(2) + spaced_kcal.group(3))
+            if 50 <= val <= 999:
+                calories_value = val
+                calories_unit = "kcal"
+    
+    # 추가: "1g2 kcal" 패턴 (g가 9로 오인식된 경우)
+    if calories_value is None or calories_value < 30:
+        kcal_g_pattern = re.search(r"(\d)[gㅇOo](\d)\s*(?:kcal|kca1|Kcal)", norm_text, re.IGNORECASE)
+        if kcal_g_pattern:
+            val = float(kcal_g_pattern.group(1) + "9" + kcal_g_pattern.group(2))
+            if 50 <= val <= 999:
+                calories_value = val
+                calories_unit = "kcal"
+                print(f"[열량 추출] g→9 변환: {val}kcal")
+    
+    # 추가: 라인별로 "192kcal" 또는 "192 kcal" 찾기
+    if calories_value is None or calories_value < 30:
+        for line in text.split('\n'):
+            kcal_line = re.search(r"(\d{2,3})\s*(?:kcal|kca1|Kcal|키)", line, re.IGNORECASE)
+            if kcal_line:
+                val = float(kcal_line.group(1))
+                if 50 <= val <= 999:
+                    calories_value = val
+                    calories_unit = "kcal"
+                    print(f"[열량 추출] 라인별: {val}kcal")
+                    break
+    
+    # 추가: "당 192" 패턴 (kcal 없이) - 1봉지당 뒤의 숫자
+    if calories_value is None or calories_value < 30:
+        dang_pattern = re.search(r"[봉회]\s*지?\s*당\s*(\d{2,3})", norm_text, re.IGNORECASE)
+        if dang_pattern:
+            val = float(dang_pattern.group(1))
+            if 50 <= val <= 999:
+                calories_value = val
+                calories_unit = "kcal"
+                print(f"[열량 추출] 당 패턴: {val}kcal")
+    
+    # 열량 값 보정: 너무 작은 값(30 미만)이면 텍스트에서 다시 검색
+    if calories_value is not None and calories_value < 30:
+        # 전체 텍스트에서 합리적인 kcal 값 찾기
+        all_kcal = re.findall(r"(\d{2,3})\s*(?:kcal|kca1|Kcal|키)", text, re.IGNORECASE)
+        for match in all_kcal:
+            val = float(match)
+            if 50 <= val <= 999:
+                print(f"[열량 보정] {calories_value} → {val}kcal")
+                calories_value = val
+                calories_unit = "kcal"
+                break
     
     # ========== 탄수화물 ==========
     carbs_patterns = [
@@ -400,24 +469,120 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
             carbs_value = float(carbs_compact_match.group(1))
             carbs_unit = carbs_compact_match.group(2) or "g"
     
+    # 탄수화물 값 보정: 100 초과시 마지막 숫자(6,8,9)를 g로 간주하고 제거
+    if carbs_value is not None and carbs_value > 100:
+        carbs_str = str(int(carbs_value))
+        if len(carbs_str) >= 2 and carbs_str[-1] in '6896':
+            corrected = float(carbs_str[:-1])
+            if 0 <= corrected <= 100:
+                print(f"[탄수화물 보정] {carbs_value} → {corrected}g")
+                carbs_value = corrected
+                carbs_unit = "g"
+    
+    # 추가: 탄수화물 라인별 검색 (28g 9% 패턴)
+    if carbs_value is None or carbs_value > 60:
+        for line in text.split('\n'):
+            # "탄수화물 28g" 또는 "탄 수 화 물 28 g" 패턴
+            carbs_line = re.search(r"[탄단]\s*수\s*화\s*물\s*(\d{1,2})\s*(?:g|8|9)", line, re.IGNORECASE)
+            if carbs_line:
+                val = float(carbs_line.group(1))
+                if 5 <= val <= 60:
+                    print(f"[탄수화물 추출] 라인별: {val}g")
+                    carbs_value = val
+                    carbs_unit = "g"
+                    break
+        
+        # 압축 텍스트에서 "탄수화물28g" 패턴
+        if carbs_value is None or carbs_value > 60:
+            text_compact = re.sub(r"\s+", "", text)
+            carbs_compact = re.search(r"[탄단]수화물(\d{1,2})[g89]", text_compact, re.IGNORECASE)
+            if carbs_compact:
+                val = float(carbs_compact.group(1))
+                if 5 <= val <= 60:
+                    print(f"[탄수화물 추출] 압축: {val}g")
+                    carbs_value = val
+                    carbs_unit = "g"
+    
+    # 탄수화물 값 보정: "20 8" → "28" (28g가 20 8로 분리된 경우)
+    if carbs_value is not None and 15 <= carbs_value <= 25:
+        # "탄수화물 20 8" 패턴 확인 (20 뒤에 8이 있으면 28로 합침)
+        carbs_208_match = re.search(r"[탄단]\s*수\s*화\s*물\s*(\d{1,2})\s*8", text, re.IGNORECASE)
+        if carbs_208_match:
+            first_num = int(carbs_208_match.group(1))
+            if first_num == int(carbs_value) and first_num < 30:
+                corrected = first_num * 10 + 8  # 20 → 208 → 실제로는 28
+                # 실제로는 "2" + "8" = 28이어야 함
+                if str(first_num).endswith('0'):
+                    corrected = int(str(first_num)[:-1] + '8')  # 20 → 28
+                    if 20 <= corrected <= 50:
+                        print(f"[탄수화물 보정] {carbs_value} → {corrected}g (20 8 → 28)")
+                        carbs_value = float(corrected)
+                        carbs_unit = "g"
+    
     # ========== 당류 ==========
     sugar_patterns = [
         # 기본 패턴: "당류 5g", "당료 2 g" (OCR 오타 포함)
-        re.compile(rf"(?:당류|당료|당분|sugar|sugars)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+        re.compile(rf"(?:당류|당료|담류|당분|sugar|sugars)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
         # "당류 5g" 또는 "당류: 5 g" 형태
-        re.compile(rf"(?:당류|당료)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg)?", re.IGNORECASE),
+        re.compile(rf"(?:당류|당료|담류)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg)?", re.IGNORECASE),
         # 공백 없는 패턴: "당류5g"
-        re.compile(rf"(?:당류|당료){num}(?P<unit>g|mg)?", re.IGNORECASE),
+        re.compile(rf"(?:당류|당료|담류){num}(?P<unit>g|mg)?", re.IGNORECASE),
     ]
     sugar_value, sugar_unit = extract_value_unit(norm_text, sugar_patterns)
     
     # 공백 없는 텍스트에서도 당류 재검색
     if sugar_value is None:
         text_compact = re.sub(r"\s+", "", norm_text)
-        sugar_compact_match = re.search(r"당[류료](\d+(?:\.\d+)?)(g|mg)?", text_compact, re.IGNORECASE)
+        sugar_compact_match = re.search(r"[당담][류료](\d+(?:\.\d+)?)(g|mg)?", text_compact, re.IGNORECASE)
         if sugar_compact_match:
             sugar_value = float(sugar_compact_match.group(1))
             sugar_unit = sugar_compact_match.group(2) or "g"
+    
+    # 추가: "당류 13g 13%" 패턴 (g 앞의 숫자만 추출, % 무시)
+    if sugar_value is None:
+        sugar_with_percent = re.search(r"[당담][류료]\s*(\d+(?:\.\d+)?)\s*g\s*\d+\s*%", norm_text, re.IGNORECASE)
+        if sugar_with_percent:
+            sugar_value = float(sugar_with_percent.group(1))
+            sugar_unit = "g"
+    
+    # 추가: 공백 있는 "당 류 13 g" 패턴
+    if sugar_value is None:
+        sugar_spaced = re.search(r"[당담]\s*류\s*(\d+(?:\.\d+)?)\s*(?:g|그램)", norm_text, re.IGNORECASE)
+        if sugar_spaced:
+            sugar_value = float(sugar_spaced.group(1))
+            sugar_unit = "g"
+    
+    # 추가: "당류 13 13%" 패턴 (g 없이 숫자만 있는 경우, 첫번째 숫자가 당류값)
+    if sugar_value is None:
+        sugar_num_only = re.search(r"[당담]\s*류[^0-9]*(\d{1,2})(?:\s+|\s*[^0-9])(\d{1,3})\s*%?", norm_text, re.IGNORECASE)
+        if sugar_num_only:
+            val = float(sugar_num_only.group(1))
+            if 0 <= val <= 50:  # 당류 합리적 범위
+                sugar_value = val
+                sugar_unit = "g"
+                print(f"[당류 추출] 숫자만 패턴: {val}g")
+    
+    # 추가: "138" 패턴 (13g가 138로 인식된 경우, g→8)
+    if sugar_value is None:
+        text_compact = re.sub(r"\s+", "", norm_text)
+        # 당류 뒤에 오는 2-3자리 숫자에서 마지막 8을 g로 해석
+        sugar_g8_match = re.search(r"[당담][류료][^0-9]*(\d{1,2})8", text_compact, re.IGNORECASE)
+        if sugar_g8_match:
+            val = float(sugar_g8_match.group(1))
+            if 0 <= val <= 50:
+                sugar_value = val
+                sugar_unit = "g"
+                print(f"[당류 추출] 8→g 변환: {val}g")
+    
+    # 당류 값 보정: 100 초과시 마지막 숫자(8,6,9)를 g로 간주하고 제거
+    if sugar_value is not None and sugar_value > 50:
+        sugar_str = str(int(sugar_value))
+        if len(sugar_str) >= 2 and sugar_str[-1] in '8689':
+            corrected = float(sugar_str[:-1])
+            if 0 <= corrected <= 50:
+                print(f"[당류 보정] {sugar_value} → {corrected}g (마지막 숫자 제거)")
+                sugar_value = corrected
+                sugar_unit = "g"
     
     # ========== 단백질 ==========
     protein_patterns = [
@@ -436,18 +601,64 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
     
     # ========== 지방 ==========
     fat_patterns = [
-        re.compile(rf"(?:지방|fat|total\s*fat)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
+        re.compile(rf"(?:지방|시방|fat|total\s*fat)\s*[:\-]?\s*{num}\s*(?P<unit>g|mg|그램|%)?", re.IGNORECASE),
     ]
     fat_value, fat_unit = extract_value_unit(norm_text, fat_patterns)
     
     # 공백 제거 후 지방 재검색 (포화지방, 트랜스지방 제외)
     if fat_value is None:
         text_compact = re.sub(r"\s+", "", norm_text)
-        # "지방9g17%" - 포화지방/트랜스지방 제외
-        fat_match = re.search(r"(?<!포화)(?<!트랜스)(?<!스)지방(\d+(?:\.\d+)?)\s*g", text_compact, re.IGNORECASE)
+        # "지방9g17%", "시방88" - 포화지방/트랜스지방 제외
+        fat_match = re.search(r"(?<!포화)(?<!트랜스)(?<!스)[지시]방(\d+(?:\.\d+)?)\s*g?", text_compact, re.IGNORECASE)
         if fat_match:
             fat_value = float(fat_match.group(1))
             fat_unit = "g"
+    
+    # 지방 값 보정: 지방 8g가 88로 인식된 경우
+    if fat_value is not None and fat_value > 50:
+        fat_str = str(int(fat_value))
+        if len(fat_str) >= 2 and fat_str[-1] in '8689':
+            corrected = float(fat_str[:-1])
+            if 0 <= corrected <= 50:
+                print(f"[지방 보정] {fat_value} → {corrected}g")
+                fat_value = corrected
+                fat_unit = "g"
+    
+    # 추가: 라인별로 "지방 8g" 패턴 찾기
+    if fat_value is None or fat_value < 5:
+        for line in text.split('\n'):
+            # "지방 8g 15%" 패턴 - 포화지방/트랜스지방 제외
+            if '포화' not in line and '트랜스' not in line:
+                fat_line = re.search(r"[지시]방\s*(\d+(?:\.\d+)?)\s*(?:g|8)\s*\d*\s*%?", line, re.IGNORECASE)
+                if fat_line:
+                    val = float(fat_line.group(1))
+                    if 3 <= val <= 50:
+                        print(f"[지방 추출] 라인별: {val}g")
+                        fat_value = val
+                        fat_unit = "g"
+                        break
+    
+    # 추가: "시방 88" 패턴 (지방 8g가 시방 88로 인식)
+    if fat_value is None or fat_value < 5:
+        fat_88 = re.search(r"[지시]방\s*(\d)8\s*1[59]", norm_text, re.IGNORECASE)  # "시방 88 15%" 패턴
+        if fat_88:
+            val = float(fat_88.group(1))
+            if 3 <= val <= 20:
+                print(f"[지방 추출] 88패턴: {val}g")
+                fat_value = val
+                fat_unit = "g"
+    
+    # 추가: 압축 텍스트에서 지방 찾기
+    if fat_value is None or fat_value < 5:
+        text_compact = re.sub(r"\s+", "", text)
+        # "지방8g15%" 또는 "시방8815%"
+        fat_compact = re.search(r"(?<!포화)(?<!트랜스)[지시]방(\d)[g8]?1[59]", text_compact, re.IGNORECASE)
+        if fat_compact:
+            val = float(fat_compact.group(1))
+            if 3 <= val <= 20:
+                print(f"[지방 추출] 압축: {val}g")
+                fat_value = val
+                fat_unit = "g"
     
     # ========== 포화지방 ==========
     sat_fat_patterns = [
@@ -487,6 +698,85 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
         if sodium_compact_match:
             sodium_value = float(sodium_compact_match.group(1))
             sodium_unit = sodium_compact_match.group(2) or "mg"
+    
+    # 추가: "나트륨 160mg 8%" 패턴 (mg 앞의 숫자만 추출, % 무시)
+    if sodium_value is None:
+        sodium_with_percent = re.search(r"나트[륨름류룹룸]\s*(\d+(?:\.\d+)?)\s*mg\s*\d+\s*%", norm_text, re.IGNORECASE)
+        if sodium_with_percent:
+            sodium_value = float(sodium_with_percent.group(1))
+            sodium_unit = "mg"
+    
+    # 추가: 공백 있는 "나 트 륨 160 mg" 패턴
+    if sodium_value is None:
+        sodium_spaced = re.search(r"나\s*트\s*[륨름류]\s*(\d+(?:\.\d+)?)\s*(?:mg|밀리그램)", norm_text, re.IGNORECASE)
+        if sodium_spaced:
+            sodium_value = float(sodium_spaced.group(1))
+            sodium_unit = "mg"
+    
+    # 추가: "트륨 160mg" 패턴 (나 가 잘려서 인식된 경우)
+    if sodium_value is None:
+        sodium_partial = re.search(r"트[륨름류]\s*(\d+(?:\.\d+)?)\s*(?:mg|밀리그램)", norm_text, re.IGNORECASE)
+        if sodium_partial:
+            val = float(sodium_partial.group(1))
+            if 10 <= val <= 5000:  # 나트륨 합리적 범위
+                sodium_value = val
+                sodium_unit = "mg"
+    
+    # 추가: "XXXmg" 패턴 (나트륨 키워드 없이, mg 앞의 3자리 숫자)
+    if sodium_value is None:
+        # 100~999mg 범위의 숫자 + mg 패턴
+        sodium_mg_only = re.search(r"(\d{2,3})\s*mg\s*\d*\s*%?", norm_text, re.IGNORECASE)
+        if sodium_mg_only:
+            val = float(sodium_mg_only.group(1))
+            if 50 <= val <= 999:  # 나트륨 합리적 범위
+                sodium_value = val
+                sodium_unit = "mg"
+                print(f"[나트륨 추출] mg만 패턴: {val}mg")
+    
+    # 추가: "16008" 패턴 (160mg 8%가 16008로 합쳐진 경우)
+    if sodium_value is None:
+        text_compact = re.sub(r"\s+", "", norm_text)
+        # 나트륨 근처의 큰 숫자에서 앞 3자리 추출
+        sodium_big_match = re.search(r"[나트][트륨름류룹]?[^0-9]*(\d{3})(\d{1,2})\d*", text_compact, re.IGNORECASE)
+        if sodium_big_match:
+            val = float(sodium_big_match.group(1))
+            if 100 <= val <= 500:  # 일반 식품 나트륨 범위
+                sodium_value = val
+                sodium_unit = "mg"
+                print(f"[나트륨 추출] 큰숫자 분리: {val}mg")
+    
+    # 추가: 라인별로 "160mg" 찾기
+    if sodium_value is None:
+        for line in text.split('\n'):
+            mg_match = re.search(r"(\d{2,3})\s*mg", line, re.IGNORECASE)
+            if mg_match:
+                val = float(mg_match.group(1))
+                if 50 <= val <= 999:
+                    sodium_value = val
+                    sodium_unit = "mg"
+                    print(f"[나트륨 추출] 라인별 mg: {val}mg")
+                    break
+    
+    # 나트륨 값 보정: 5000 초과시 앞 3자리만 추출 (140mg7% → 14007 → 140)
+    if sodium_value is not None and sodium_value > 1000:
+        sodium_str = str(int(sodium_value))
+        if len(sodium_str) >= 4:
+            # 앞 3자리 추출 (14007 → 140)
+            corrected = float(sodium_str[:3])
+            if 50 <= corrected <= 999:
+                print(f"[나트륨 보정] {sodium_value} → {corrected}mg (앞 3자리)")
+                sodium_value = corrected
+                sodium_unit = "mg"
+    
+    # 추가: "140mg7%" 패턴 직접 검색 (mg 뒤에 %가 붙어있는 경우)
+    if sodium_value is None:
+        sodium_mg_percent = re.search(r"(\d{2,3})mg\d{1,2}%", text.replace(" ", ""), re.IGNORECASE)
+        if sodium_mg_percent:
+            val = float(sodium_mg_percent.group(1))
+            if 50 <= val <= 999:
+                print(f"[나트륨 추출] mg%패턴: {val}mg")
+                sodium_value = val
+                sodium_unit = "mg"
     
     # ========== 1회 제공량 ==========
     serving_match = re.search(
@@ -811,7 +1101,7 @@ def extract_nutrition_and_allergens(text: str) -> NutritionInfo:
     trans_fat_value = validate_range(trans_fat_value, 20, "트랜스지방")  # 최대 20g
     cholesterol_value = validate_range(cholesterol_value, 1000, "콜레스테롤")  # 최대 1000mg
     sodium_value = validate_range(sodium_value, 5000, "나트륨")  # 최대 5000mg
-    
+
     return NutritionInfo(
         calories_value=calories_value,
         calories_unit=calories_unit or "kcal" if calories_value else None,
@@ -998,7 +1288,6 @@ def detail(item_id):
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
     if "file" not in request.files:
-        # API 요청인지 확인 (Accept 헤더 또는 경로로 판단)
         if request.path == "/api/upload" or request.headers.get("Accept") == "application/json":
             return Response(json.dumps({"error": "No file provided"}, ensure_ascii=False),
                             content_type="application/json; charset=utf-8")
@@ -1014,7 +1303,7 @@ def api_upload():
 
     # OCR
     text = run_ocr(str(save_path), lang="kor+eng")
-    
+
     # 디버그: OCR 결과 출력
     print(f"[OCR 원본 - 전체]\n{text}\n{'='*50}")
 
@@ -1032,7 +1321,7 @@ def api_upload():
             translated = translate_text_papago(text)
             if translated:
                 print(f"[번역 결과]\n{translated[:500]}...")
-                analysis_text = translated  # 번역된 텍스트로 분석
+                analysis_text = translated
     
     # 분석 (번역된 텍스트 또는 원본 사용)
     nutrition = extract_nutrition_and_allergens(analysis_text)
